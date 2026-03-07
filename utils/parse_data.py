@@ -2,10 +2,13 @@
 import os
 import json
 import math
+import random
+import numpy as np
+import open3d as o3d
+from tqdm import tqdm
 from pathlib import Path
 import matplotlib.pyplot as plt
 
-SPLITS = ['train', 'val', 'test']
 INPUT_DIR = '../data'
 OUTPUT_DIR = '../data/processed'
 DEBUG = False # Set to True to visualize BEV of first frame in each split
@@ -77,6 +80,64 @@ def calculate_occlusion(objects_list):
     
     return objects_list
 
+def count_points(pcd_data, cube, DEBUG=False):
+    '''Manually count points if not present'''
+    try:
+        points = pcd_data
+        if len(points) == 0: 
+            return 0
+
+        center = np.array(cube['center'])
+        translated_points = points - center
+
+        # Rotate points to align with axis
+        yaw = cube['yaw']
+        rotation_matrix = np.array([
+            [np.cos(-yaw), -np.sin(-yaw), 0],
+            [np.sin(-yaw),  np.cos(-yaw), 0],
+            [0,             0,            1]
+        ])
+        rotated_points = translated_points @ rotation_matrix.T
+
+        # Filter by dimensions
+        l, w, h = cube['dims']
+        in_x = np.abs(rotated_points[:, 0]) <= (l/2)
+        in_y = np.abs(rotated_points[:, 1]) <= (w/2)
+        in_z = np.abs(rotated_points[:, 2]) <= (h/2)
+
+        count = np.sum(in_x & in_y & in_z)
+
+        # Visualize results
+        if DEBUG:
+            fig = plt.figure()
+            ax = fig.add_subplot(projection='3d')
+
+            mask = in_x & in_y & in_z
+
+            if(np.any(mask)):
+                ax.scatter(xs=rotated_points[mask, 0],
+                        ys=rotated_points[mask, 1],
+                        zs=rotated_points[mask, 2],
+                        s=2, c='blue', label='Inside Box'
+                        )
+            
+            inv_mask = ~mask
+            step = max(1, len(rotated_points) // 1000)
+
+            ax.scatter(xs=rotated_points[inv_mask, 0][::step],
+                    ys=rotated_points[inv_mask, 1][::step],
+                    zs=rotated_points[inv_mask, 2][::step],
+                    s=0.5, c='gray', alpha=0.3
+            )
+            plt.title(f"Point Count: {int(count)}")
+            plt.show()
+
+        return int(count)
+
+    except Exception as e:
+        print(f"Error counting points for {pcd_path.split('/')[-1]}: {e}")
+        return 0
+
 def bin_distance(distance_m):
     '''Convert distance into category'''
     if distance_m < 15.0:
@@ -88,29 +149,23 @@ def bin_distance(distance_m):
 
 def get_relative_position(x, y):
     '''Maps 3D coordinates to directions'''
-    if x > 7.0:
-        pos_x = "front"
-    elif x < -7.0:
-        pos_x = "rear"
-    else:
-        pos_x = "adjacent"
+    if x > 7.0: pos_x = "front"
+    elif x < -7.0: pos_x = "rear"
+    else: pos_x = "adjacent"
     
-    if y > 2.5:
-        pos_y = "left"
-    elif y < -2.5:
-        pos_y = "right"
-    else:
-        pos_y = "center"
+    if y > 2.5: pos_y = "left"
+    elif y < -2.5: pos_y = "right"
+    else: pos_y = "center"
 
     return f"{pos_x}-{pos_y}"
 
 def process_split(split):
     '''Loops through JSON files and processes each in a split'''
-    data_path = os.path.join(INPUT_DIR, split, 'labels_point_clouds', 's110_lidar_ouster_south_and_vehicle_lidar_robosense_registered')
-
+    data_path = f"{INPUT_DIR}/{split}/labels_point_clouds/s110_lidar_ouster_south_and_vehicle_lidar_robosense_registered"
     parsed_frames = []
+    corrected_objects = 0
 
-    for file in os.listdir(data_path):
+    for file in tqdm(os.listdir(data_path)):
         if file.endswith('.json'):
             data = load_json(os.path.join(data_path, file))
 
@@ -137,6 +192,11 @@ def process_split(split):
                 rel_path = f"./data/{split}/point_clouds/{folder_name}/{pcd}"
                 pcd_paths.append(rel_path)
 
+            registered_pcd = pcd_paths[-1].replace('./', '../')
+            if os.path.exists(registered_pcd):
+                pcd = o3d.io.read_point_cloud(registered_pcd)
+                pcd_data = np.asarray(pcd.points)
+
             transforms_dict = content.get('frame_properties', {}).get('transforms', {})
             sensor_transform = transforms_dict.get('vehicle_lidar_robosense_to_s110_lidar_ouster_south', {})
             transforms = sensor_transform.get('transform_src_to_dst', {}).get('matrix4x4', [])
@@ -157,11 +217,13 @@ def process_split(split):
                 color = "unknown"
                 for attr in obj_data['cuboid'].get('attributes', {}).get('text', []):
                     if attr['name'] == 'sensor_id':
-                        sensor_source = attr['val']
+                        val = attr['val']
+                        if val != "":
+                            sensor_source = val
                     if attr['name'] == 'body_color':
-                        color = attr['val']
-                        if color == "":
-                            color = "unknown"
+                        val = attr['val']
+                        if val != "":
+                            color = val
 
                 # Calculate heading
                 yaw_deg = math.degrees(cube['yaw'])
@@ -171,21 +233,22 @@ def process_split(split):
                 else: heading = "facing backward"
 
                 # Calculate density
-                num_points = 0
+                num_points = -1
                 for attr in obj_data['cuboid'].get('attributes', {}).get('num', []):
                     if attr['name'] == 'num_points':
                         num_points = attr['val']
 
-                if num_points > 1500:
-                    density = "ultra-dense"
-                elif num_points > 500:
-                    density = "high"
-                elif num_points > 100:
-                    density = "medium"
-                elif num_points > 0: 
-                    density = "sparse"    
-                else:
-                    density = "trace"
+                        # Count points manually
+                        if num_points == -1:
+                            num_points = count_points(pcd_data, cube)
+                            corrected_objects += 1
+
+                if num_points > 1500: density = "ultra-dense"
+                elif num_points > 500: density = "high"
+                elif num_points > 100: density = "medium"
+                elif num_points > 0:  density = "sparse"    
+                elif num_points == 0: density = "trace"
+                else: density = "unknown"
 
                 simplified_objects.append({
                     "id": obj_data['name'],
@@ -204,7 +267,7 @@ def process_split(split):
                     "density": density,
                     "color": color
                 })
-            
+
             # Append clean frame
             parsed_frames.append({
                 "frame_id": frame_id,
@@ -253,13 +316,30 @@ def debug_viz_bev(parsed_frames, frame_idx=0):
     plt.show()
 
 if __name__ == '__main__':
-    for split in SPLITS:
-        print(f"Processing {split} split...")
-        processed_data = process_split(split)
+    print("Processing train files:")
+    original_train = process_split('train')
 
-        if DEBUG and len(processed_data) > 0:
-            print(f"Visualizing debug BEV for {split}...")
-            debug_viz_bev(processed_data, frame_idx=0)
+    random.seed(42)
+    random.shuffle(original_train)
 
-        save_path = save_metrics(processed_data, split)
-        print(f"Saved to {save_path}")
+    # Split train into new train and val
+    split_idx = int(len(original_train) * 0.85) # Keep 680 as train, change 120 to val
+    new_train = original_train[:split_idx]
+    new_val = original_train[split_idx:]
+
+    # Use val files as new test
+    print("Processing val files:")
+    new_test = process_split('val')
+
+    if DEBUG and len(new_train) > 0 and len(new_val) > 0 and len(new_test) > 0:
+        print(f"Visualizing debug BEV for training data...")
+        debug_viz_bev(new_train, frame_idx=0)
+        print(f"Visualizing debug BEV for validation data...")
+        debug_viz_bev(new_val, frame_idx=0)
+        print(f"Visualizing debug BEV for testing data...")
+        debug_viz_bev(new_test, frame_idx=0)
+
+    save_metrics(new_train, 'train')
+    save_metrics(new_val, 'val')
+    save_metrics(new_test, 'test')
+    print(f"All splits processed and saved to {OUTPUT_DIR}")
