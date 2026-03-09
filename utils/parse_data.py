@@ -368,16 +368,11 @@ def process_split(split):
 
                 # Get sensor source and color
                 sensor_source = "unknown"
-                color = "unknown"
                 for attr in obj_data['cuboid'].get('attributes', {}).get('text', []):
                     if attr['name'] == 'sensor_id':
                         val = attr['val']
                         if val != "":
                             sensor_source = val
-                    if attr['name'] == 'body_color':
-                        val = attr['val']
-                        if val != "":
-                            color = val
 
                 # Calculate heading
                 yaw_deg = math.degrees(cube['yaw'])
@@ -437,7 +432,6 @@ def process_split(split):
 
                 size_desc = get_size_category(cube['dims'][0], cube['dims'][1], cube['dims'][2])
                 position_desc = get_relative_position(cube['center'][0], cube['center'][1], sensor_source)
-                is_visible_to_camera = len(bboxes_2d) > 0
 
                 simplified_objects.append({
                     "id": obj_data['name'].lower(),
@@ -454,11 +448,10 @@ def process_split(split):
                     "height_m": round(cube['dims'][2], 2),
                     "heading": heading,
                     "detected_by": sensor_source,
+                    "primary_view": best_camera,
                     "density": density,
-                    "color": color,
                     "bboxes": bboxes_2d,
-                    "is_truncated": truncation_info,
-                    "is_visible_in_images": is_visible_to_camera
+                    "is_truncated": truncation_info
                 })
 
             # Append clean frame
@@ -512,13 +505,29 @@ if __name__ == '__main__':
     print("Processing train files:")
     original_train = process_split('train')
 
-    random.seed(42)
-    random.shuffle(original_train)
+    original_train.sort(key=lambda x: x['timestamp'])
 
-    # Split train into new train and val
-    split_idx = int(len(original_train) * 0.85) # Keep 680 as train, change 120 to val
-    new_train = original_train[:split_idx]
-    new_val = original_train[split_idx:]
+    scenes = []
+    current_scene = [original_train[0]]
+
+    # Split into scenes based on timestamp
+    for i in range(1, len(original_train)):
+        if original_train[i]['timestamp'] - original_train[i-1]['timestamp'] > 2.0:
+            scenes.append(current_scene)
+            current_scene = []
+        current_scene.append(original_train[i])
+    scenes.append(current_scene)
+
+    # Day/Night split
+    day_scenes = scenes[:7]
+    night_scenes = scenes[7:]
+
+    # Create new train/val split
+    train_scenes = day_scenes[:6] + night_scenes[:2]
+    val_scenes = day_scenes[6] + night_scenes[2]
+
+    new_train = [frame for scene in train_scenes for frame in scene]
+    new_val = [frame for scene in val_scenes for frame in scene]
 
     # Use val files as new test
     print("Processing val files:")
