@@ -430,6 +430,9 @@ def process_split(split):
                 if best_camera is None and bboxes_2d:
                     best_camera = max(bboxes_2d, key=lambda k: (bboxes_2d[k][2]-bboxes_2d[k][0]) * (bboxes_2d[k][3]-bboxes_2d[k][1]))
 
+                if best_camera is None:
+                    best_camera = "unknown"
+
                 size_desc = get_size_category(cube['dims'][0], cube['dims'][1], cube['dims'][2])
                 position_desc = get_relative_position(cube['center'][0], cube['center'][1], sensor_source)
 
