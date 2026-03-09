@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 TEST = True  # Set to True for real-time API
-LIMIT = 10 if TEST else 800
+LIMIT = 1 if TEST else 800
 INPUT_DIR = "../data/processed"
 OUTPUT_FILE = "../data/raw_dataset.json"
 MODEL = "gpt-4o"
@@ -15,46 +15,52 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 SYSTEM_PROMPT = """
 You are an expert AI data engineer for V2X (Vehicle-to-Everything) Cooperative Perception.
-Your task: Convert JSON multi-sensor frames into exactly 10 high-quality QRA triplets for Qwen3-VL fine-tuning.
+Your task: Convert JSON multi-sensor frames into exactly 10 high-quality QRA triplets for Qwen-VL fine-tuning.
 
 OUTPUT FORMAT (STRICT):
-You MUST output a valid JSON array `[` ... `]`. Do not output loose JSON objects.
+You MUST output a valid JSON array `[` ... `]`. Do not output loose JSON objects. Each object must have exactly three keys: "prompt", "rationale", and "answer".
 
 MODALITY TOKEN RULES (MANDATORY):
-- Image data (bbox, visibility status, camera name): wrap in <|vision_start|>...<|vision_end|>.
-- Spatial/LiDAR data (distance_m, x, y, point cloud): wrap in <|lidar_start|>...<|lidar_end|>.
-- Multi-modal fusion: Use BOTH tags appropriately in the same answer.
-- NO TAGS IN THINKING: NEVER use <|vision_start|> or <|lidar_start|> tags inside the <think> block. Save them entirely for the final Answer string.
+- Visual Grounding: DO NOT wrap text in vision or lidar tags. Output bounding boxes as raw arrays [xmin, ymin, xmax, ymax].
 
 THINKING PROTOCOL (SPATIAL LOGIC):
-Inside the <think> tag, you must execute this 3-step logic:
+Inside the "rationale" field, write out a natural, step-by-step internal monologue:
+- "First, I need to check the ego-vehicle camera to see if [ID] is visible..." (State visibility and coords).
+- "Since it is occluded by [Occluder], I need to check the infrastructure sensors..."
+- "The s110 camera clearly captures it at [bbox], so I will structure my final answer to highlight this V2X redundancy."
 1. SENSOR IDENTIFICATION: Explicitly name the sensor (e.g., 'vehicle_camera_basler_16mm' vs 's110_camera_basler_south2_8mm'). Do not just say "the vehicle".
 2. METADATA EXTRACTION: Extract the exact object ID, metric coordinates (x, y), and bbox arrays. If bboxes are empty, you MUST still extract the (x, y) coordinates.
-3. SPATIAL CROSS-CHECK & EXACT STRING MATCHING: 
-   - CRITICAL PERSPECTIVE RULE: The `visibility` field (e.g., "occluded_by_...") applies ONLY to the ego-vehicle's perspective. 
-   - INFRASTRUCTURE VANTAGE (OCCLUSION): If an object is occluded from the ego-vehicle but visible to infrastructure, DO NOT paraphrase. You MUST use this EXACT string template: "The ego-vehicle cannot see [Object_ID] because it is physically blocked by [Occluder_ID], BUT the infrastructure sensor [Sensor_Name] has a clear view and detects it at [bbox]."
-   - STRICT FOV RULE: If `visibility` is "clear" but there is no vehicle bounding box, DO NOT paraphrase. You MUST use this EXACT string template: "The object is outside the ego-vehicle's Field of View (FOV), but the infrastructure sensor captures it clearly at [bbox]." (Note: If the object is truncated, append the exact sentence "Note: This bounding box is truncated." at the end. Do NOT alter the main template.)
-   - COMPLETE BLIND SPOT RULE: If the `bboxes` object is entirely empty `{}` for all sensors, DO NOT put coordinates in the vision tag. Use this exact structure: "<|vision_start|>The object is currently outside the visual field of both the ego-vehicle and infrastructure cameras.<|vision_end|> <|lidar_start|>Its spatial position is tracked via LiDAR at x: [x], y: [y] at a distance of [distance_m]m.<|lidar_end|>"
-   - Do not hallucinate physics. Truncation means the object is at the edge of the camera frame, not occluded by distance.
+3. SPATIAL CROSS-CHECK & EXACT STRING MATCHING FOR THE ANSWER: 
+   - RULE 1: COMPLETE BLIND SPOT (CHECK THIS FIRST): If the `bboxes` object is entirely empty `{}` or missing for BOTH the ego-vehicle and infrastructure sensors, DO NOT use any other rule. Use this exact structure: "The object is currently outside the visual field of both the ego-vehicle and infrastructure cameras. Its spatial position is tracked via LiDAR at x: [x], y: [y] at a distance of [distance_m]m."
+   - RULE 2: INFRASTRUCTURE VANTAGE (OCCLUSION): If an object is occluded from the ego-vehicle but has a valid bbox from the infrastructure sensor, use this EXACT string template: "The ego-vehicle cannot see [Object_ID] because it is physically blocked by [Occluder_ID], BUT the infrastructure sensor [Sensor_Name] has a clear view and detects it at [insert actual bbox coordinates here]." (Note: If truncated, append "Note: This bounding box is truncated." at the end.)
+   - RULE 3: STRICT FOV: If `visibility` is "clear" but there is no vehicle bounding box, AND the infrastructure sensor has a valid bbox, use this EXACT string template: "The object is outside the ego-vehicle's Field of View (FOV), but the infrastructure sensor captures it clearly at [insert actual bbox coordinates here]." (Note: If truncated, append "Note: This bounding box is truncated." at the end.)
+   - CRITICAL: Never literally output the string "[bbox]". Always replace it with the actual coordinate array (e.g., [100, 200, 300, 400]). If you do not have coordinate numbers, you must fall back to RULE 1.
 
 CORE OBJECTIVES:
-- Emphasize the exact value of V2X: Explicitly contrast the ego-vehicle's blind spots (occlusions/FOV limits) against the infrastructure's clear vantage point (presence of s110 bboxes).
+- Emphasize the exact value of V2X: Explicitly contrast the ego-vehicle's blind spots (occlusions/FOV limits) against the infrastructure's clear vantage point.
 - NEVER invent or truncate IDs. Use 'car_7e29ba6e' exactly as written.
 
-QUESTION VARIETY RULE: Do not repeat the same question structure. Vary the instruction and input fields based on the context:
+PROMPT DIVERSITY ENGINE (CRITICAL - READ CAREFULLY):
+You MUST aggressively randomize the syntactic structure of the "prompt" field. Do NOT repeat question formats. 
+Mix and match these styles:
+- Direct spatial queries: "Where is [ID] located?" or "Give me the coordinates for [ID]."
+- Conversational safety queries: "Is there anything hiding behind the truck that I should know about?" or "Can the ego vehicle safely see [ID]?"
+- Sensor-specific commands: "Cross-reference the infrastructure camera with the ego-vehicle for [ID]." or "What does the s110 camera see regarding [ID]?"
 
-- If occluded: Ask about "occlusion resolution" or "safety risk."
-- If outside FOV: Ask about "blind spot coverage" or "infrastructure assistance."
-- If visible to both: Ask about "cooperative perception validation" or "redundancy."
+FORBIDDEN PHRASES: You are strictly FORBIDDEN from starting prompts with:
+- "Analyze the occlusion risk..."
+- "How does infrastructure assist..."
+- "Evaluate the visibility of..."
+- "Discuss the detection of..."
 
 STRICT ADHERENCE: If you provide any text outside of the JSON array, your response is considered a failure. Do not include markdown code block syntax (```json). Return ONLY the raw JSON array.
 
 EXAMPLE OUTPUT:
 [
   {
-    "instruction": "Evaluate the visibility of car_4eab2f36 from the vehicle vs infrastructure.",
-    "input": "Can the vehicle see car_4eab2f36, or is infrastructure data required?",
-    "output": "<think>The vehicle_camera_basler_16mm has no bbox for car_4eab2f36 because its visibility field states it is 'occluded_by_car_7e29ba6e'. However, it exists in 3D space at (x: 42.12, y: 7.17). The infrastructure sensor s110_camera_basler_south2_8mm has a clear vantage point and captures it at bbox [914, 297, 973, 383].</think>Answer: <|vision_start|>The ego-vehicle cannot see car_4eab2f36 because it is physically blocked by car_7e29ba6e, BUT the infrastructure sensor s110_camera_basler_south2_8mm has a clear view and detects it at [914, 297, 973, 383].<|vision_end|> <|lidar_start|>The object's true spatial position is x: 42.12, y: 7.17 at a distance of 42.72m.<|lidar_end|>"
+    "prompt": "Is there anything hiding behind car_7e29ba6e that the ego vehicle should be aware of regarding car_4eab2f36?",
+    "rationale": "First, I need to check the ego-vehicle camera to see if car_4eab2f36 is visible. I see that vehicle_camera_basler_16mm has no bounding box for it because it is marked as 'occluded_by_car_7e29ba6e'. However, checking the spatial data, the object does exist in 3D space at (x: 42.12, y: 7.17). Since it is occluded from the ego-vehicle, I need to check the infrastructure sensors to see if they can resolve this blind spot. Looking at the s110_camera_basler_south2_8mm data, it clearly captures the car at bbox [914, 297, 973, 383]. I will structure my final answer to highlight this V2X redundancy.",
+    "answer": "The ego-vehicle cannot see car_4eab2f36 because it is physically blocked by car_7e29ba6e, BUT the infrastructure sensor s110_camera_basler_south2_8mm has a clear view and detects it at [914, 297, 973, 383]. The object's true spatial position is x: 42.12, y: 7.17 at a distance of 42.72m."
   }
 ]
 """
@@ -71,10 +77,13 @@ QA_SCHEMA = {
                     "rationale": {"type": "string"},
                     "answer": {"type": "string"}
                 },
-                "required": ["prompt", "rationale", "answer"]
+                "required": ["prompt", "rationale", "answer"],
+                "additionalProperties": False
             }
         }
-    }
+    },
+    "required": ["triplets"],
+    "additionalProperties": False
 }
 
 def simplify_frame(frame):
@@ -120,8 +129,8 @@ def run_realtime(frames):
         try:
             response = client.responses.create(
                 model=MODEL,
-                temperature=0.0,
-                top_p=0.25,
+                temperature=0.3,
+                top_p=0.7,
                 max_output_tokens=4096,
                 instructions=SYSTEM_PROMPT,
                 input=json.dumps(simplify_frame(frame)),                
