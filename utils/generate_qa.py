@@ -15,54 +15,93 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 SYSTEM_PROMPT = """
 You are an expert AI data engineer for V2X (Vehicle-to-Everything) Cooperative Perception.
-Your task: Convert JSON multi-sensor frames into exactly 10 high-quality QRA triplets for Qwen-VL fine-tuning.
+Your task: Convert JSON multi-sensor frames into exactly 10 high-quality QRA (Question, Rationale, Answer) samples for Qwen-VL fine-tuning.
 
 OUTPUT FORMAT (STRICT):
-You MUST output a valid JSON array `[` ... `]`. Do not output loose JSON objects. Each object must have exactly three keys: "prompt", "rationale", and "answer".
+You MUST output a valid JSON object containing a triplets array
+{
+  "prompt": "The natural language question.",
+  "rationale": "The step-by-step reasoning process.",
+  "answer": "The conversational answer provided to the driver/system.",
+  "structured_metrics": {
+    "task_type": "maneuver" | "counting" | "spatial",
+    "decision": "safe | unsafe | yield | monitor",
+    "hazard_level": "none | low | medium | high",
+    "count": <integer>,
+    "grounded_objects": [
+      {
+         "type": "type of object",
+         "bbox": [xmin, ymin, xmax, ymax],
+         "distance_m": <float>,
+	     "sensor_id": "sensor source"
+      }
+    ]
+  }
+}
 
-MODALITY TOKEN RULES (MANDATORY):
-- Visual Grounding: DO NOT wrap text in vision or lidar tags. Output bounding boxes as raw arrays [xmin, ymin, xmax, ymax].
+TASK DISTRIBUTION ENGINE (MANDATORY MIX):
+To ensure global scene awareness, your 10 generated samples MUST follow this exact distribution of task types.
+- 4x Driving Maneuver Tasks: Ask if a specific driving action is safe (e.g., turning left, proceeding through intersection). Base the danger on actual occluded objects in the JSON revealed by V2X/LiDAR.
+- 3x Scene Counting/Filtering Tasks: Ask about quantities or classes in blind spots (e.g., "How many pedestrians are hidden from the ego-vehicle?").
+- 3x Relational/Spatial Tasks: Ask about distances or relative positions of specific hazards.
 
-THINKING PROTOCOL (SPATIAL LOGIC):
-Inside the "rationale" field, write out a natural, step-by-step internal monologue:
-- "First, I need to check the ego-vehicle camera to see if [ID] is visible..." (State visibility and coords).
-- "Since it is occluded by [Occluder], I need to check the infrastructure sensors..."
-- "The s110 camera clearly captures it at [bbox], so I will structure my final answer to highlight this V2X redundancy."
-1. SENSOR IDENTIFICATION: Explicitly name the sensor (e.g., 'vehicle_camera_basler_16mm' vs 's110_camera_basler_south2_8mm'). Do not just say "the vehicle".
-2. METADATA EXTRACTION: Extract the exact object ID, metric coordinates (x, y), and bbox arrays. If bboxes are empty, you MUST still extract the (x, y) coordinates.
-3. SPATIAL CROSS-CHECK & EXACT STRING MATCHING FOR THE ANSWER: 
-   - RULE 1: COMPLETE BLIND SPOT (CHECK THIS FIRST): If the `bboxes` object is entirely empty `{}` or missing for BOTH the ego-vehicle and infrastructure sensors, DO NOT use any other rule. Use this exact structure: "The object is currently outside the visual field of both the ego-vehicle and infrastructure cameras. Its spatial position is tracked via LiDAR at x: [x], y: [y] at a distance of [distance_m]m."
-   - RULE 2: INFRASTRUCTURE VANTAGE (OCCLUSION): If an object is occluded from the ego-vehicle but has a valid bbox from the infrastructure sensor, use this EXACT string template: "The ego-vehicle cannot see [Object_ID] because it is physically blocked by [Occluder_ID], BUT the infrastructure sensor [Sensor_Name] has a clear view and detects it at [insert actual bbox coordinates here]." (Note: If truncated, append "Note: This bounding box is truncated." at the end.)
-   - RULE 3: STRICT FOV: If `visibility` is "clear" but there is no vehicle bounding box, AND the infrastructure sensor has a valid bbox, use this EXACT string template: "The object is outside the ego-vehicle's Field of View (FOV), but the infrastructure sensor captures it clearly at [insert actual bbox coordinates here]." (Note: If truncated, append "Note: This bounding box is truncated." at the end.)
-   - CRITICAL: Never literally output the string "[bbox]". Always replace it with the actual coordinate array (e.g., [100, 200, 300, 400]). If you do not have coordinate numbers, you must fall back to RULE 1.
+THINKING PROTOCOL (SCENE AWARENESS LOGIC):
+Inside the "rationale", write out a flowing, natural monologue:
+1. Evaluate the *global scene* from the ego-vehicle's perspective (identify occluders and FOV limits).
+2. Cross-reference infrastructure sensors and LiDAR data to reveal hidden hazards.
+3. Synthesize how these hidden objects impact the driving task.
+- STRICT OCCLUDER CHECK: You MUST read the literal string in the "visibility" key. If an object says "occluded_by_car_123", then "car" is the occluder. Do NOT guess the occluder based on vehicle size. If "visibility" is "clear", NEVER treat it as a hidden hazard.
+- STRICT SPATIAL GROUNDING: You MUST include the exact (x, y) coordinates from the JSON in your rationale for every hidden hazard mentioned (e.g., 'LiDAR detects a medium car at x: -23.45, y: -11.1'). Do not use JSON IDs.
+- LiDAR JUSTIFICATION: Explicitly state why LiDAR/infrastructure was required (e.g., 'Because the ego-camera only sees the side of the nearby car, infrastructure LiDAR is required to spot the trailer at 16 meters...').
+- STRICT ENVIRONMENTAL GROUNDING: Do NOT hallucinate driving environments (e.g., do not mention parking lots or highways unless explicitly supported by the data). You must infer the ego-vehicle's current scenario strictly from the "position" keys of the objects in the JSON (e.g., if objects are at the "intersection center", the ego-vehicle is at an intersection).
 
-CORE OBJECTIVES:
-- Emphasize the exact value of V2X: Explicitly contrast the ego-vehicle's blind spots (occlusions/FOV limits) against the infrastructure's clear vantage point.
-- NEVER invent or truncate IDs. Use 'car_7e29ba6e' exactly as written.
+ANSWER GUIDELINES:
+- Your "answer" should be fluid and conversational, explaining the situation clearly based on the rationale. 
+- Keep rationales under 150 words while maintaining the spatial logic.
+- Your "structured_metrics" MUST accurately reflect the answer. 
+- If the task is a Counting task, the "count" field must be the total integer, and the "grounded_objects" array should list the specific objects counted.
+- Visual Grounding: DO NOT wrap text in vision or lidar tags.
+- Missing Bounding Boxes: If an object is detected by LiDAR but has no camera bounding box in the input JSON, output "bbox": []. DO NOT output [0,0,0,0].
+- If a Maneuver task detects multiple hidden hazards, your "structured_metrics" must ground ALL of those hidden hazards and the "count" must reflect the total number of grounded objects, not just the closest one.
+- Bounding Box Extraction: The bboxes field in the JSON is a dictionary. Extract the bounding box array corresponding to the camera listed in the object's primary_view. If bboxes is empty, if the camera key is missing, or if primary_view is "unknown", output "bbox": [].
+- Empty Blind Spots: If a Maneuver task checks behind an occluder and finds NO hidden objects, set "decision": "Safe", "hazard_level": "None", "count": 0, and "grounded_objects": [].
+- Ensure all double quotes inside JSON strings are properly escaped with a backslash
 
-PROMPT DIVERSITY ENGINE (CRITICAL - READ CAREFULLY):
-You MUST aggressively randomize the syntactic structure of the "prompt" field. Do NOT repeat question formats. 
-Mix and match these styles:
-- Direct spatial queries: "Where is [ID] located?" or "Give me the coordinates for [ID]."
-- Conversational safety queries: "Is there anything hiding behind the truck that I should know about?" or "Can the ego vehicle safely see [ID]?"
-- Sensor-specific commands: "Cross-reference the infrastructure camera with the ego-vehicle for [ID]." or "What does the s110 camera see regarding [ID]?"
-
-FORBIDDEN PHRASES: You are strictly FORBIDDEN from starting prompts with:
-- "Analyze the occlusion risk..."
-- "How does infrastructure assist..."
-- "Evaluate the visibility of..."
-- "Discuss the detection of..."
+PROMPT SYNTAX RANDOMIZATION & PERSONA MATRIX (CRITICAL):
+To guarantee lexical diversity across the 10 samples, you MUST rotate through these distinct personas for both the prompt and rationale:
+- The Autonomous System Log: Clinical, robotic, data-driven. (e.g., "Diagnostic run. V2X telemetry indicates a blocked vector...")
+- The Driving Instructor: Educational, cautious, instructional. (e.g., "Before you make that turn, notice how our line of sight is cut off...")
+- The Co-Pilot: Conversational, helpful, direct. (e.g., "I wouldn't switch lanes just yet. The infrastructure feed shows...")
+- The Physics Engine: Focuses purely on trajectories, coordinates, and spatial geometry.
+Do NOT rely on the phrase "LiDAR detects" or "LiDAR reveals". Use varied verbs: "broadcasts," "pings," "registers," "picks up," "telemetry shows," "infrastructure confirms."
 
 STRICT ADHERENCE: If you provide any text outside of the JSON array, your response is considered a failure. Do not include markdown code block syntax (```json). Return ONLY the raw JSON array.
 
 EXAMPLE OUTPUT:
-[
-  {
-    "prompt": "Is there anything hiding behind car_7e29ba6e that the ego vehicle should be aware of regarding car_4eab2f36?",
-    "rationale": "First, I need to check the ego-vehicle camera to see if car_4eab2f36 is visible. I see that vehicle_camera_basler_16mm has no bounding box for it because it is marked as 'occluded_by_car_7e29ba6e'. However, checking the spatial data, the object does exist in 3D space at (x: 42.12, y: 7.17). Since it is occluded from the ego-vehicle, I need to check the infrastructure sensors to see if they can resolve this blind spot. Looking at the s110_camera_basler_south2_8mm data, it clearly captures the car at bbox [914, 297, 973, 383]. I will structure my final answer to highlight this V2X redundancy.",
-    "answer": "The ego-vehicle cannot see car_4eab2f36 because it is physically blocked by car_7e29ba6e, BUT the infrastructure sensor s110_camera_basler_south2_8mm has a clear view and detects it at [914, 297, 973, 383]. The object's true spatial position is x: 42.12, y: 7.17 at a distance of 42.72m."
-  }
+
+{
+"triplets": [
+    {
+        "prompt": "Executing a self-diagnostic. Is the intended left turn path completely clear of hidden hazards?",
+        "rationale": "System sensors indicate a severe blind spot. The ego-camera's line of sight is completely cut off because of visibility: occluded_by_truck_99a. Relying solely on onboard vision would be critical error. Accessing the V2X infrastructure LiDAR array reveals an oncoming hazard we cannot see: a medium car at coordinates x: 14.22, y: 31.05. Because this concealed vehicle is on a direct collision vector for the left turn, the maneuver must be aborted.",
+        "answer": "Negative. It is unsafe to proceed. While the truck is blocking your camera's view, infrastructure LiDAR has detected a car hidden behind it at approximately 34 meters away. Yield immediately.",
+        "structured_metrics": {
+        "task_type": "maneuver",
+        "decision": "yield",
+        "hazard_level": "high",
+        "count": 1,
+        "grounded_objects": [
+            {
+            "type": "car",
+            "bbox": [412, 290, 500, 380],
+            "distance_m": 34.11,
+            "sensor_id": "s110_lidar_ouster_south"
+            }
+        ]
+        }
+    }
 ]
+}
 """
 
 QA_SCHEMA = {
@@ -75,9 +114,37 @@ QA_SCHEMA = {
                 "properties": {
                     "prompt": {"type": "string"},
                     "rationale": {"type": "string"},
-                    "answer": {"type": "string"}
+                    "answer": {"type": "string"},
+                    "structured_metrics": {
+                        "type": "object",
+                        "properties": {
+                            "task_type": {"type": "string"},
+                            "decision": {"type": "string"},
+                            "hazard_level": {"type": "string"},
+                            "count": {"type": "integer"},
+                            "grounded_objects": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": {"type": "string"},
+                                        "bbox": {
+                                            "type": "array",
+                                            "items": {"type": "number"}
+                                        },
+                                        "distance_m": {"type": "number"},
+                                        "sensor_id": {"type": "string"}
+                                    },
+                                    "required": ["type", "bbox", "distance_m", "sensor_id"],
+                                    "additionalProperties": False
+                                }
+                            }
+                        },
+                        "required": ["task_type", "decision", "hazard_level", "count", "grounded_objects"],
+                        "additionalProperties": False
+                    }
                 },
-                "required": ["prompt", "rationale", "answer"],
+                "required": ["prompt", "rationale", "answer", "structured_metrics"],
                 "additionalProperties": False
             }
         }
@@ -92,10 +159,9 @@ def simplify_frame(frame):
         "frame_id": frame["frame_id"],
         "objects": [
             {
-                "id": obj.get("id", "unknown"),
+                "type": obj.get("type", "unknown"),
                 "x": obj.get("x", 0.0),
                 "y": obj.get("y", 0.0),
-                "type": obj.get("type", "unknown"),
                 "size": obj.get("size", "unknown"),
                 "distance_category": obj.get("distance_category", "unknown"),
                 "distance_m": obj.get("distance_m", 0.0),
@@ -129,9 +195,9 @@ def run_realtime(frames):
         try:
             response = client.responses.create(
                 model=MODEL,
-                temperature=0.3,
-                top_p=0.7,
-                max_output_tokens=4096,
+                temperature=0.7,
+                top_p=0.9,
+                max_output_tokens=16384,
                 instructions=SYSTEM_PROMPT,
                 input=json.dumps(simplify_frame(frame)),                
                 text={
@@ -172,9 +238,9 @@ def run_batch(frames):
                 "url": "/v1/responses",
                 "body": {
                     "model": MODEL,
-                    "temperature": 0.0,
-                    "top_p": 0.25,
-                    "max_output_tokens": 4096,
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                    "max_output_tokens": 16384,
                     "instructions": SYSTEM_PROMPT,
                     "input": json.dumps(simplify_frame(frame)),
                     "text": {
