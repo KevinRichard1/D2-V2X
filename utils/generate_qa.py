@@ -2,13 +2,13 @@
 import os
 import json
 from openai import OpenAI
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 load_dotenv(override=True)
 
-TEST = True  # Set to True for real-time API
-LIMIT = 1 if TEST else 800
-INPUT_DIR = "../data/processed"
+REALTIME_TEST = False  # Set to True for real-time API
+BATCH_TEST = True # Set to true to use batch API for a single frame
+INPUT_DIR = "../data/metrics"
 OUTPUT_FILE = "../data/raw_dataset.json"
 MODEL = "gpt-4o"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -48,12 +48,13 @@ To ensure global scene awareness, your 10 generated samples MUST follow this exa
 THINKING PROTOCOL (SCENE AWARENESS LOGIC):
 Inside the "rationale", write out a flowing, natural monologue:
 1. Evaluate the *global scene* from the ego-vehicle's perspective (identify occluders and FOV limits).
-2. Cross-reference infrastructure sensors and LiDAR data to reveal hidden hazards.
+2. Cross-reference infrastructure sensors and LiDAR data to expose hidden hazards.
 3. Synthesize how these hidden objects impact the driving task.
-- STRICT OCCLUDER CHECK: You MUST read the literal string in the "visibility" key. If an object says "occluded_by_car_123", then "car" is the occluder. Do NOT guess the occluder based on vehicle size. If "visibility" is "clear", NEVER treat it as a hidden hazard.
-- STRICT SPATIAL GROUNDING: You MUST include the exact (x, y) coordinates from the JSON in your rationale for every hidden hazard mentioned (e.g., 'LiDAR detects a medium car at x: -23.45, y: -11.1'). Do not use JSON IDs.
-- LiDAR JUSTIFICATION: Explicitly state why LiDAR/infrastructure was required (e.g., 'Because the ego-camera only sees the side of the nearby car, infrastructure LiDAR is required to spot the trailer at 16 meters...').
-- STRICT ENVIRONMENTAL GROUNDING: Do NOT hallucinate driving environments (e.g., do not mention parking lots or highways unless explicitly supported by the data). You must infer the ego-vehicle's current scenario strictly from the "position" keys of the objects in the JSON (e.g., if objects are at the "intersection center", the ego-vehicle is at an intersection).
+- STRICT OCCLUDER CHECK & ID STRIPPING: Read the literal string in the "visibility" key. If it says "occluded_by_car_123", identify the occluder simply as "a car". You MUST strip all alphanumeric IDs from your rationale and answer (Write "hidden by a truck", NEVER write "hidden by truck_99a"). 
+- VISIBILITY RULES: NEVER guess an occluder based on vehicle size. If "visibility" is "clear", treat it as a visible object, NOT a hidden hazard.
+- STRICT SPATIAL GROUNDING: Include the exact (x, y) coordinates from the JSON in your rationale for every hidden hazard mentioned (e.g., 'Telemetry registers a medium car at x: -23.45, y: -11.1').
+- REQUIRED SENSOR VERBS: Explicitly state why infrastructure was needed. You MUST use one of the following verbs to describe the sensor action: "broadcasts," "pings," "registers," "picks up," "telemetry shows," or "infrastructure confirms." (Example: 'Because the ego-camera only sees the side of the nearby car, infrastructure LiDAR pings the trailer at 16 meters...')
+- STRICT ENVIRONMENTAL GROUNDING: Infer the ego-vehicle's scenario strictly from the "position" keys. Do not hallucinate environments (e.g., do not mention parking lots or highways unless explicitly supported by the position keys).
 
 ANSWER GUIDELINES:
 - Your "answer" should be fluid and conversational, explaining the situation clearly based on the rationale. 
@@ -65,15 +66,23 @@ ANSWER GUIDELINES:
 - If a Maneuver task detects multiple hidden hazards, your "structured_metrics" must ground ALL of those hidden hazards and the "count" must reflect the total number of grounded objects, not just the closest one.
 - Bounding Box Extraction: The bboxes field in the JSON is a dictionary. Extract the bounding box array corresponding to the camera listed in the object's primary_view. If bboxes is empty, if the camera key is missing, or if primary_view is "unknown", output "bbox": [].
 - Empty Blind Spots: If a Maneuver task checks behind an occluder and finds NO hidden objects, set "decision": "Safe", "hazard_level": "None", "count": 0, and "grounded_objects": [].
+- For counting tasks, ONLY count objects where the 'visibility' key contains an occluder. NEVER base a counting task on 'clear' objects
 - Ensure all double quotes inside JSON strings are properly escaped with a backslash
 
 PROMPT SYNTAX RANDOMIZATION & PERSONA MATRIX (CRITICAL):
-To guarantee lexical diversity across the 10 samples, you MUST rotate through these distinct personas for both the prompt and rationale:
-- The Autonomous System Log: Clinical, robotic, data-driven. (e.g., "Diagnostic run. V2X telemetry indicates a blocked vector...")
-- The Driving Instructor: Educational, cautious, instructional. (e.g., "Before you make that turn, notice how our line of sight is cut off...")
-- The Co-Pilot: Conversational, helpful, direct. (e.g., "I wouldn't switch lanes just yet. The infrastructure feed shows...")
-- The Physics Engine: Focuses purely on trajectories, coordinates, and spatial geometry.
-Do NOT rely on the phrase "LiDAR detects" or "LiDAR reveals". Use varied verbs: "broadcasts," "pings," "registers," "picks up," "telemetry shows," "infrastructure confirms."
+To guarantee lexical diversity across the 10 samples, you MUST roleplay as one of these four personas for both the prompt and rationale. Embody the persona completely using first-person language ("I", "we", "my"). Speak directly to the driver or system. 
+
+REQUIRED PERSONAS:
+1. The Autonomous System Log: Clinical, robotic, data-driven. (e.g., "Diagnostic run. My V2X telemetry indicates a blocked vector...")
+2. The Driving Instructor: Educational, cautious, instructional. (e.g., "Before we make that turn, notice how our line of sight is cut off...")
+3. The Co-Pilot: Conversational, helpful, direct. (e.g., "I wouldn't switch lanes just yet. My infrastructure feed shows...")
+4. The Physics Engine: Focuses purely on trajectories, coordinates, and spatial geometry. (e.g., "Calculating vectors. I am registering a blocked path...")
+
+PERSONA GUARDRAILS:
+- DO: Speak entirely in character.
+- DO NOT: Ever name the persona or speak in the third person. 
+- BAD EXAMPLE: "The co-pilot assessment indicates a blind spot..."
+- GOOD EXAMPLE: "I am checking the blind spot..."
 
 STRICT ADHERENCE: If you provide any text outside of the JSON array, your response is considered a failure. Do not include markdown code block syntax (```json). Return ONLY the raw JSON array.
 
@@ -262,17 +271,18 @@ def run_batch(frames):
         endpoint="/v1/responses",
         completion_window="24h"
     )
+    set_key(".env", "BATCH_JOB_ID", batch_job.id)
     print(f"Batch Job Created. ID: {batch_job.id}")
 
 if __name__ == "__main__":
-    if TEST:
+    if REALTIME_TEST:
         # Test on subset of specific file
         test_path = os.path.join(INPUT_DIR, "train_metrics.json")
         if not os.path.exists(test_path):
             print(f"Error: {test_path} not found.")
         else:
             with open(test_path, "r") as f:
-                test_frames = json.load(f)[:LIMIT]
+                test_frames = json.load(f)[:1]
 
             results = run_realtime(test_frames)
             with open(OUTPUT_FILE, "w") as f:
@@ -295,7 +305,12 @@ if __name__ == "__main__":
                     print(f"Warning: {file_name} is not a list.")
 
         if all_frames:
-            print(f"Total frames collected: {len(all_frames)}. Submitting batch job")
-            run_batch(all_frames)
+            if BATCH_TEST:
+                frames_to_submit = all_frames[:1]
+                print("Running batch test on a single frame...")
+            else:
+                frames_to_submit = all_frames
+                print(f"Submitting batch job on {len(all_frames)} frames...")
+            run_batch(frames_to_submit)
         else:
             print("No valid JSON files found in directory.")
