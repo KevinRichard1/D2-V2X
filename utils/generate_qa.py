@@ -9,7 +9,9 @@ load_dotenv(override=True)
 REALTIME_TEST = False  # Set to True for real-time API
 BATCH_TEST = True # Set to true to use batch API for a single frame
 INPUT_DIR = "../data/metrics"
-OUTPUT_FILE = "../data/raw_dataset.json"
+REALTIME_OUTPUT_FILE = "../data/raw/raw_dataset.json"
+BATCH_OUTPUT_DIR = "../data/raw"
+os.makedirs(BATCH_OUTPUT_DIR, exist_ok=True)
 MODEL = "gpt-4o"
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -238,7 +240,7 @@ def run_realtime(frames):
 
 def run_batch(frames):
     '''Batch API processing for full dataset'''
-    batch_file = "batch_input.jsonl"
+    batch_file = os.path.join(BATCH_OUTPUT_DIR, "batch_input.jsonl")
     with open(batch_file, "w") as f:
         for frame in frames:
             req = {
@@ -285,7 +287,7 @@ if __name__ == "__main__":
                 test_frames = json.load(f)[:1]
 
             results = run_realtime(test_frames)
-            with open(OUTPUT_FILE, "w") as f:
+            with open(REALTIME_OUTPUT_FILE, "w") as f:
                 json.dump(results, f, indent=4)
             print(f"Processed {len(results)} QA pairs.")
     else:
@@ -311,6 +313,6 @@ if __name__ == "__main__":
             else:
                 frames_to_submit = all_frames
                 print(f"Submitting batch job on {len(all_frames)} frames...")
-            run_batch(frames_to_submit)
+            # run_batch(frames_to_submit)
         else:
             print("No valid JSON files found in directory.")

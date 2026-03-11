@@ -11,7 +11,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 BATCH_JOB_ID = os.getenv("BATCH_JOB_ID")
 
 METRICS_DIR = "../data/metrics"
-BATCH_OUTPUT_FILE = "batch_results.jsonl"
+BATCH_OUTPUT_FILE = "../data/raw/batch_results.jsonl"
 FINAL_DATASET_DIR = "../data/datasets"
 
 # Dataset variations
