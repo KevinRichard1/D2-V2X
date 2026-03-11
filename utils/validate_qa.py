@@ -163,7 +163,14 @@ def format_for_qwen(merged_data, include_lidar=True, v2x=True, cot=True):
     required by Qwen-VL for fine-tuning.'''
     print("Formatting dataset for Qwen-VL...")
     dataset = []
+    frame_counts = {}
+
     for sample in merged_data:
+        frame_id = sample.get("frame_id")
+        
+        frame_counts[frame_id] = frame_counts.get(frame_id, 0) + 1
+        unique_id = f"{frame_id}_{frame_counts[frame_id]}"
+
         prompt_parts = []
         file_metadata = {"image_paths": []}
         rationale = sample.get('rationale', '')
@@ -208,7 +215,7 @@ def format_for_qwen(merged_data, include_lidar=True, v2x=True, cot=True):
             )
 
         conversation_sample = {
-            "id": sample.get("frame_id"),
+            "id": unique_id,
             "file_metadata": file_metadata,
             "conversations": [
                 {
