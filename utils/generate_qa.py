@@ -7,7 +7,8 @@ from dotenv import load_dotenv, set_key
 load_dotenv(override=True)
 
 REALTIME_TEST = False  # Set to True for real-time API
-BATCH_TEST = True # Set to true to use batch API for a single frame
+BATCH_TEST = False # Set to true to test batch API on specified number of frames
+TEST_SIZE = 5 # Number of frames to test on
 INPUT_DIR = "../data/metrics"
 REALTIME_OUTPUT_FILE = "../data/raw/raw_dataset.json"
 BATCH_OUTPUT_DIR = "../data/raw"
@@ -85,6 +86,7 @@ PERSONA GUARDRAILS:
 - DO NOT: Ever name the persona or speak in the third person. 
 - BAD EXAMPLE: "The co-pilot assessment indicates a blind spot..."
 - GOOD EXAMPLE: "I am checking the blind spot..."
+- FORCE DISTRIBUTION: You MUST rotate evenly through all 4 personas across the 10 samples. Do not overuse the Autonomous System.
 
 STRICT ADHERENCE: If you provide any text outside of the JSON array, your response is considered a failure. Do not include markdown code block syntax (```json). Return ONLY the raw JSON array.
 
@@ -208,7 +210,7 @@ def run_realtime(frames):
                 model=MODEL,
                 temperature=0.7,
                 top_p=0.9,
-                max_output_tokens=16384,
+                max_output_tokens=4096,
                 instructions=SYSTEM_PROMPT,
                 input=json.dumps(simplify_frame(frame)),                
                 text={
@@ -251,7 +253,7 @@ def run_batch(frames):
                     "model": MODEL,
                     "temperature": 0.7,
                     "top_p": 0.9,
-                    "max_output_tokens": 16384,
+                    "max_output_tokens": 4096,
                     "instructions": SYSTEM_PROMPT,
                     "input": json.dumps(simplify_frame(frame)),
                     "text": {
@@ -308,11 +310,11 @@ if __name__ == "__main__":
 
         if all_frames:
             if BATCH_TEST:
-                frames_to_submit = all_frames[:1]
-                print("Running batch test on a single frame...")
+                frames_to_submit = all_frames[:TEST_SIZE]
+                print(f"Running batch test on {TEST_SIZE} frames...")
             else:
                 frames_to_submit = all_frames
                 print(f"Submitting batch job on {len(all_frames)} frames...")
-            # run_batch(frames_to_submit)
+            run_batch(frames_to_submit)
         else:
             print("No valid JSON files found in directory.")
