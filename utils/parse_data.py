@@ -10,7 +10,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 INPUT_DIR = '../data'
-OUTPUT_DIR = '../data/processed'
+OUTPUT_DIR = '../data/metrics'
 DEBUG = False # Set to True to visualize BEV of first frame in each split
 
 def load_json(file_path):
@@ -525,9 +525,32 @@ if __name__ == '__main__':
     day_scenes = scenes[:7]
     night_scenes = scenes[7:]
 
+    def split_by_frame_count(scene_list, val_ratio=0.15):
+        """Dynamically splits scenes to hit a target frame ratio."""
+        total_frames = sum(len(s) for s in scene_list)
+        target_val = int(total_frames * val_ratio)
+        train_s, val_s = [], []
+        val_count = 0
+        
+        # Shuffle scenes
+        random.seed(42)
+        shuffled = scene_list[:]
+        random.shuffle(shuffled)
+        
+        for s in shuffled:
+            if val_count < target_val:
+                val_s.append(s)
+                val_count += len(s)
+            else:
+                train_s.append(s)
+        return train_s, val_s
+
     # Create new train/val split
-    train_scenes = day_scenes[:6] + night_scenes[:2]
-    val_scenes = day_scenes[6] + night_scenes[2]
+    day_train, day_val = split_by_frame_count(day_scenes, val_ratio=0.15)
+    night_train, night_val = split_by_frame_count(night_scenes, val_ratio=0.15)
+
+    train_scenes = day_train + night_train
+    val_scenes = day_val + night_val
 
     new_train = [frame for scene in train_scenes for frame in scene]
     new_val = [frame for scene in val_scenes for frame in scene]
