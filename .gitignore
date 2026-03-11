@@ -1,2 +1,4 @@
 data
 *.safetensors
+.env
+utils/*.jsonl
