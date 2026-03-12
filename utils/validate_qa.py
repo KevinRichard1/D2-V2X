@@ -17,7 +17,7 @@ FINAL_DATASET_DIR = "../data/datasets"
 # Dataset variations
 INCLUDE_LIDAR = True        # Set false for Image + BEV only
 V2X = True                  # Set false for ego-vehicle only
-COT = False                  # Set false for no chain-of-thought
+COT = True                  # Set false for no chain-of-thought
 
 def wait_for_batch_completion(batch_id, poll_interval_sec=60):
     '''Polls the OpenAI API until the batch job completes or fails.'''
