@@ -7,8 +7,7 @@ library_name: transformers
     <img alt="Chat" src="https://img.shields.io/badge/%F0%9F%92%9C%EF%B8%8F%20Qwen%20Chat%20-536af5" style="display: inline-block; vertical-align: middle;"/>
 </a>
 
-
-# Qwen3-VL-8B-Instruct
+# Qwen3-VL-8B-Thinking
 
 
 Meet Qwen3-VL — the most powerful vision-language model in the Qwen series to date.
@@ -50,7 +49,8 @@ Available in Dense and MoE architectures that scale from edge to cloud, with Ins
 
 3. **Text–Timestamp Alignment:** Moves beyond T‑RoPE to precise, timestamp‑grounded event localization for stronger video temporal modeling.
 
-This is the weight repository for Qwen3-VL-8B-Instruct.
+
+This is the weight repository for Qwen3-VL-8B-Thinking.
 
 
 ---
@@ -59,16 +59,16 @@ This is the weight repository for Qwen3-VL-8B-Instruct.
 
 **Multimodal performance**
 
-![](https://qianwen-res.oss-accelerate.aliyuncs.com/Qwen3-VL/qwen3vl_4b_8b_vl_instruct.jpg)
+![](https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-VL/qwen3vl_4b_8b_vl_thinking.jpg)
 
 **Pure text performance**
-![](https://qianwen-res.oss-accelerate.aliyuncs.com/Qwen3-VL/qwen3vl_4b_8b_text_instruct.jpg)
+![](https://qianwen-res.oss-accelerate.aliyuncs.com/Qwen3-VL/qwen3vl_4b_8b_text_thinking.jpg)
 
 ## Quickstart
 
 Below, we provide simple examples to show how to use Qwen3-VL with 🤖 ModelScope and 🤗 Transformers.
 
-The code of Qwen3-VL has been in the latest Hugging Face transformers and we advise you to build from source with command:
+The code of Qwen3-VL has been in the latest Hugging face transformers and we advise you to build from source with command:
 ```
 pip install git+https://github.com/huggingface/transformers
 # pip install transformers==4.57.0 # currently, V4.57.0 is not released
@@ -76,25 +76,25 @@ pip install git+https://github.com/huggingface/transformers
 
 ### Using 🤗 Transformers to Chat
 
-Here we show a code snippet to show how to use the chat model with `transformers`:
+Here we show a code snippet to show you how to use the chat model with `transformers`:
 
 ```python
 from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
 
 # default: Load the model on the available device(s)
 model = Qwen3VLForConditionalGeneration.from_pretrained(
-    "Qwen/Qwen3-VL-8B-Instruct", dtype="auto", device_map="auto"
+    "Qwen/Qwen3-VL-8B-Thinking", dtype="auto", device_map="auto"
 )
 
 # We recommend enabling flash_attention_2 for better acceleration and memory saving, especially in multi-image and video scenarios.
 # model = Qwen3VLForConditionalGeneration.from_pretrained(
-#     "Qwen/Qwen3-VL-8B-Instruct",
+#     "Qwen/Qwen3-VL-8B-Thinking",
 #     dtype=torch.bfloat16,
 #     attn_implementation="flash_attention_2",
 #     device_map="auto",
 # )
 
-processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-8B-Instruct")
+processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-8B-Thinking")
 
 messages = [
     {
@@ -134,24 +134,25 @@ print(output_text)
 #### VL
 ```bash
 export greedy='false'
-export top_p=0.8
+export top_p=0.95
 export top_k=20
-export temperature=0.7
 export repetition_penalty=1.0
-export presence_penalty=1.5
-export out_seq_length=16384
+export presence_penalty=0.0
+export temperature=1.0
+export out_seq_length=40960
 ```
 
 #### Text
 ```bash
 export greedy='false'
-export top_p=1.0
-export top_k=40
+export top_p=0.95
+export top_k=20
 export repetition_penalty=1.0
-export presence_penalty=2.0
+export presence_penalty=1.5
 export temperature=1.0
-export out_seq_length=32768
+export out_seq_length=32768 (for aime, lcb, and gpqa, it is recommended to set to 81920)
 ```
+
 
 
 ## Citation
