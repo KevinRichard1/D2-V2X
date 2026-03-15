@@ -1,5 +1,4 @@
 '''Dataset Loader'''
-import re
 import json
 from pathlib import Path
 from PIL import Image
@@ -12,7 +11,10 @@ class D2V2XDataset(Dataset):
         self.data_root = Path(data_root)
         self.feature_dir = Path(feature_dir)
         self.processor = processor
-        self.mode = mode
+        if isinstance(mode, str):
+            self.mode = [mode]
+        else:
+            self.mode = mode
         self.is_training = is_training
 
         with open(json_path, "r") as f:
@@ -36,7 +38,7 @@ class D2V2XDataset(Dataset):
 
         lidar_tensors = None
 
-        if self.mode == "image_only":
+        if "image_only" in self.mode:
             # Clean up LiDAR files
             user_query = user_query.replace("LiDAR: <lidar>\n", "")
             user_query = user_query.replace("<lidar>", "[LiDAR data not available]")
@@ -44,8 +46,14 @@ class D2V2XDataset(Dataset):
             safetensor_path = self.feature_dir / f"{sample_id}.safetensors"
             lidar_tensors = load_file(safetensor_path)
 
-            if self.mode == "no_cot":
-                response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+        if "zero_shot" in self.mode:
+            instruction = (
+                "\nOutput your final decision in the following JSON format: "
+                '{"decision": "yield/proceed", "hazard_level": "low/high", "count": int, '
+                '"grounded_objects": [{"type": str, "bbox": [ymin, xmin, ymax, xmax]}]}'
+            )
+
+            user_query += instruction
 
         # Format for Qwen
         user_content = [
