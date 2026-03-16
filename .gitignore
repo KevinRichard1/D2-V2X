@@ -1,4 +1,4 @@
 data
 *.safetensors
 .env
-utils/*.jsonl
+*.slurm
