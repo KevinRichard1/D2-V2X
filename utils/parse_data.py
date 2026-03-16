@@ -449,6 +449,7 @@ def process_split(split):
                     "length_m": round(cube['dims'][0], 2),
                     "width_m": round(cube['dims'][1], 2),
                     "height_m": round(cube['dims'][2], 2),
+                    "yaw_rad": round(cube['yaw'], 6),
                     "heading": heading,
                     "detected_by": sensor_source,
                     "primary_view": best_camera,
