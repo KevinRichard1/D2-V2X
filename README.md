@@ -47,7 +47,7 @@ BATCH_JOB_ID=batch-...    # only needed when running validate_qa.py
 **Data & model weights** are not included in the repo (too large). You will need:
 - [TUMTraf A9 dataset](https://innovation-mobility.com/en/project-providentia/a9-dataset/#anchor_release_4) extracted to `data/`
 - [Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Thinking) weights placed in `qwen/`
-- HPC access for fine-tuning runs ([UNC Charlotte HPC](https://oneit.charlotte.edu/innovation/research-computing/get-started/))
+- A high-compute environment (GPU cluster or cloud instance) for fine-tuning runs
 
 Expected `data/` layout after extraction:
 

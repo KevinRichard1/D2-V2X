@@ -254,7 +254,11 @@ def main():
     for split in splits:
         print(f"\nProcessing Split: {split.upper()}")
         
-        ground_truth_path = os.path.join(METRICS_DIR, f"{split}_metrics.json")
+        # Prefer the BEV metrics file (written by generate_bev.py) since it
+        # contains bev_path fields; fall back to the original if absent.
+        bev_metrics_path = os.path.join(METRICS_DIR, f"{split}_bev_metrics.json")
+        ground_truth_path = bev_metrics_path if os.path.exists(bev_metrics_path) \
+            else os.path.join(METRICS_DIR, f"{split}_metrics.json")
         if not os.path.exists(ground_truth_path):
             print(f"Warning: {ground_truth_path} not found. Skipping {split}.")
             continue

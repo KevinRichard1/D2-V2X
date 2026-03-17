@@ -3,8 +3,9 @@
 Reads metrics JSON files produced by parse_data.py, loads the corresponding
 registered PCD file for each frame, rasterizes the point cloud into a
 height-coloured top-down image, overlays annotated bounding boxes, and saves
-the result as a PNG.  The bev_path for each frame is written back into the
-metrics JSON so that validate_qa.py can consume it.
+the result as a PNG.  The bev_path for each frame is written into a new
+*_bev_metrics.json file (leaving the original *_metrics.json intact) so
+that validate_qa.py can consume it without risk of data loss on crashes.
 
 Run order:
     1. parse_data.py   -> data/metrics/{split}_metrics.json
@@ -26,14 +27,14 @@ METRICS_DIR    = '../data/metrics'
 OUTPUT_BASE    = '../data'          # BEV images go to OUTPUT_BASE/{split}/bev/
 
 # ── BEV rasterisation parameters ─────────────────────────────────────────────
-X_RANGE   = (-50.0, 50.0)   # metres along X (forward = +X)
-Y_RANGE   = (-50.0, 50.0)   # metres along Y (left   = +Y)
-Z_MIN     = -3.0             # metres – below this is treated as ground noise
-Z_MAX     =  5.0             # metres – colour scale ceiling
-RESOLUTION = 0.1             # metres per pixel
+X_RANGE   = (-125.0, 125.0)  # metres along X (forward = +X)
+Y_RANGE   = (-125.0, 125.0)  # metres along Y (left   = +Y)
+Z_MIN     = -3.0              # metres – below this is treated as ground noise
+Z_MAX     =  5.0              # metres – colour scale ceiling
+RESOLUTION = 0.2              # metres per pixel
 
-IMG_H = int((X_RANGE[1] - X_RANGE[0]) / RESOLUTION)   # 1000 px
-IMG_W = int((Y_RANGE[1] - Y_RANGE[0]) / RESOLUTION)   # 1000 px
+IMG_H = int((X_RANGE[1] - X_RANGE[0]) / RESOLUTION)   # 1250 px
+IMG_W = int((Y_RANGE[1] - Y_RANGE[0]) / RESOLUTION)   # 1250 px
 
 # ── Object-type colours (RGB 0-1) ─────────────────────────────────────────────
 TYPE_COLORS = {
@@ -296,11 +297,13 @@ def process_split(split, metrics_path):
             skipped += 1
             print(f"  [WARN] Could not load PCD: {pcd_path}")
 
-    # ── Write bev_path back into metrics ──────────────────────────────────────
-    with open(metrics_path, 'w') as f:
+    # ── Write bev_path into a new file to preserve the original ──────────────
+    bev_metrics_path = metrics_path.replace('_metrics.json', '_bev_metrics.json')
+    with open(bev_metrics_path, 'w') as f:
         json.dump(frames, f, indent=4)
 
     print(f"  {split}: generated={generated}  skipped={skipped}")
+    print(f"  Saved BEV metrics to {bev_metrics_path}")
     return frames
 
 
@@ -322,4 +325,4 @@ if __name__ == '__main__':
             continue
         process_split(split, metrics_path)
 
-    print('\nDone.  bev_path fields written back to metrics JSON files.')
+    print('\nDone.  bev_path fields written to *_bev_metrics.json files (originals unchanged).')
