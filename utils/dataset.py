@@ -48,9 +48,15 @@ class D2V2XDataset(Dataset):
 
         if "zero_shot" in self.mode:
             instruction = (
-                "\nOutput your final decision in the following JSON format: "
-                '{"decision": "yield/proceed", "hazard_level": "low/high", "count": int, '
-                '"grounded_objects": [{"type": str, "bbox": [ymin, xmin, ymax, xmax]}]}'
+                "\nAnalyze the scene and provide your response in two parts. "
+                "First, briefly explain your reasoning. Second, output the final decision in a markdown JSON block.\n\n"
+                "EXAMPLE FORMAT:\n"
+                "Based on the images, I can see X, Y, and Z...\n"
+                "```json\n"
+                '{"decision": "yield", "hazard_level": "high", "count": 2, '
+                '"grounded_objects": [{"type": "pedestrian", "bbox": [10, 20, 30, 40]}]}\n'
+                "```\n\n"
+                "Now, provide your analysis and JSON for the current images."
             )
 
             user_query += instruction
@@ -75,4 +81,4 @@ class D2V2XDataset(Dataset):
                 "content": [{"type": "text", "text": response}]
             })
 
-        return messages, lidar_tensors, sample['id']        
+        return messages, lidar_tensors, sample['id']
