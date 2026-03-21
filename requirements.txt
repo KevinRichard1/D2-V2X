@@ -1,2 +1,3 @@
 # Requirements for the main project
 transformers
+accelerate
