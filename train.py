@@ -51,7 +51,7 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
         d2v2x_model.model.resize_token_embeddings(len(processor.tokenizer))
 
     # Load pretrained MLP checkpoint
-    if mlp_ckpt is not None:
+    if mlp_ckpt is not None and hasattr(d2v2x_model, 'lidar_mlp'):
         print(f"Loading pre-trained LiDAR MLP weights from {mlp_ckpt}...")
         mlp_state_dict = load_file(mlp_ckpt)
         d2v2x_model.lidar_mlp.load_state_dict(mlp_state_dict, strict=True)
@@ -59,6 +59,7 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
     lora_config = LoraConfig(r=256, lora_alpha=16, target_modules="all-linear")
     d2v2x_model.model = get_peft_model(d2v2x_model.model, lora_config)
 
+    # Freeze params
     if stage == 1:
         for name, param in d2v2x_model.named_parameters():
             if "lidar_mlp" in name.lower():
@@ -67,7 +68,7 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
                 param.requires_grad = False
     else:
         for name, param in d2v2x_model.named_parameters():
-            if "lora" in name.lower() or "lidar_mlp" in name.lower():
+            if "lora" in name.lower() or ("lidar_mlp" in name.lower() and hasattr(d2v2x_model, 'lidar_mlp')):
                 param.requires_grad = True
             else:
                 param.requires_grad = False
@@ -134,9 +135,10 @@ def main():
     os.makedirs(final_save_dir, exist_ok=True)
 
     # Save LiDAR MLP
-    mlp_save_path = f"{final_save_dir}/lidar_mlp.safetensors"
-    save_file(d2v2x_model.lidar_mlp.state_dict(), mlp_save_path)
-    print(f"LiDAR MLP weights saved to {mlp_save_path}")
+    if hasattr(d2v2x_model, 'lidar_mlp'):
+        mlp_save_path = f"{final_save_dir}/lidar_mlp.safetensors"
+        save_file(d2v2x_model.lidar_mlp.state_dict(), mlp_save_path)
+        print(f"LiDAR MLP weights saved to {mlp_save_path}")
 
     if args.stage == 2:
         # Save LoRA adapters
