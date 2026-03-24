@@ -6,11 +6,11 @@ from .adapter import LiDARMLP, inject_lidar_embeddings
 class D2V2XModel(nn.Module):
     '''Wrapper class for the D2-V2X architecture'''
 
-    def __init__(self, model_path: str, config):
+    def __init__(self, model_path: str, mode):
         '''Initializes the base VLM and the custom LiDAR adapter'''
         super().__init__()
         
-        self.config = config
+        self.mode = mode
         self.model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_path,
             torch_dtype="auto",
@@ -20,16 +20,16 @@ class D2V2XModel(nn.Module):
         )
 
         # Initialize adapter if needed
-        if self.config.mode in ['ego', 'v2x']:
+        if self.mode in ['ego', 'v2x']:
             text_out = self.model.config.text_config.hidden_size
 
-            self.lidar_adapter = LiDARMLP(
+            self.lidar_mlp = LiDARMLP(
                 input_dim=512, # From CenterPoint features
                 hidden_dim=2048,
                 output_dim=text_out
             )
 
-            self.lidar_adapter.to(
+            self.lidar_mlp.to(
                 device=self.model.device, 
                 dtype=self.model.dtype
             )
@@ -61,13 +61,13 @@ class D2V2XModel(nn.Module):
                 labels=labels,
                 **kwargs
             )
-        elif self.config.mode in ['ego', 'v2x']:
+        elif self.mode in ['ego', 'v2x']:
             # Get LiDAR tokens
             lidar_features = lidar_features.to(
                 device=self.model.device, 
                 dtype=self.model.dtype
             )
-            lidar_tokens = self.lidar_adapter(lidar_features)
+            lidar_tokens = self.lidar_mlp(lidar_features)
 
             # Add LiDAR embeddings
             inputs_embeds = inject_lidar_embeddings(
@@ -86,7 +86,7 @@ class D2V2XModel(nn.Module):
                 **kwargs
             )
         else:
-            raise ValueError(f"Unknown mode: {self.config.mode}")
+            raise ValueError(f"Unknown mode: {self.mode}")
 
     @torch.no_grad()
     def generate(
@@ -104,13 +104,13 @@ class D2V2XModel(nn.Module):
                 images=images,
                 **kwargs
             )
-        elif self.config.mode in ['ego', 'v2x']:
+        elif self.mode in ['ego', 'v2x']:
             # Get LiDAR tokens
             lidar_features = lidar_features.to(
                 device=self.model.device, 
                 dtype=self.model.dtype
             )
-            lidar_tokens = self.lidar_adapter(lidar_features)
+            lidar_tokens = self.lidar_mlp(lidar_features)
 
             # Add LiDAR embeddings
             inputs_embeds = inject_lidar_embeddings(
@@ -128,4 +128,4 @@ class D2V2XModel(nn.Module):
                 **kwargs
             )
         else:
-            raise ValueError(f"Unknown mode: {self.config.mode}")
+            raise ValueError(f"Unknown mode: {self.mode}")
