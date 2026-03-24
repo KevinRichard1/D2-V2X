@@ -49,12 +49,16 @@ class D2V2XDataCollator:
             )
             new_texts.append(new_text)
          
+         # Cap resolution
+         MAX_PIXELS = 1280 * 720
+
          # Processor call
          inputs = self.processor(
             text=new_texts,
             images=all_images if len(all_images) > 0 else None,
             padding=True,
-            return_tensors="pt"
+            return_tensors="pt",
+            max_pixels=MAX_PIXELS
          )
          
          # Add LiDAR features to inputs

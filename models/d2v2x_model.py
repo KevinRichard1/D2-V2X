@@ -42,6 +42,10 @@ class D2V2XModel(nn.Module):
         '''Allows libraries to update the embedding layer.'''
         self.model.set_input_embeddings(value)
 
+    def gradient_checkpointing_enable(self, **kwargs):
+        '''Passes gradient checkpointing flag to base model'''
+        self.model.gradient_checkpointing_enable(**kwargs)
+
     def forward(
         self, 
         input_ids: torch.Tensor, 
