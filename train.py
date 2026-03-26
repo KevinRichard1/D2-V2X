@@ -57,8 +57,19 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
     # Load pretrained MLP checkpoint
     if mlp_ckpt is not None and hasattr(d2v2x_model, 'lidar_mlp'):
         print(f"Loading pre-trained LiDAR MLP weights from {mlp_ckpt}...")
-        mlp_state_dict = load_file(mlp_ckpt)
-        d2v2x_model.lidar_mlp.load_state_dict(mlp_state_dict, strict=True)
+        full_state_dict = load_file(mlp_ckpt)
+
+        mlp_state_dict = {}
+        for k, v in full_state_dict.items():
+            if k.startswith("lidar_mlp."):
+                new_key = k.replace("lidar_mlp.", "", 1)
+                mlp_state_dict[new_key] = v
+                
+        if len(mlp_state_dict) == 0:
+            print("WARNING: No LiDAR MLP weights found in checkpoint")
+        else:
+            d2v2x_model.lidar_mlp.load_state_dict(mlp_state_dict, strict=True)
+            print("Successfully loaded LiDAR MLP weights.")
 
     if stage ==2:
         print("Applying LoRA Config...")
@@ -135,7 +146,7 @@ def main():
         warmup_ratio=0.03,
         weight_decay=0.05,
         optim="adamw_torch_fused",
-        dataloader_num_workers=4,
+        dataloader_num_workers=0,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.accum_steps,
@@ -145,7 +156,7 @@ def main():
         remove_unused_columns=False,
         report_to=["wandb"],
         logging_steps=10,
-        eval_strategy="epoch",
+        eval_strategy="epoch" if args.stage == 2 else "no",
         save_strategy="epoch",
         save_total_limit=2
     )
