@@ -5,11 +5,13 @@ import torch
 from transformers import AutoProcessor, TrainingArguments, Trainer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from safetensors.torch import save_file, load_file
+from functools import partial
 
 # Custom modules
 from models.d2v2x_model import D2V2XModel
 from data_pipeline.dataset import D2V2XDataset
 from data_pipeline.collator import D2V2XDataCollator
+from utils.metrics import preprocess_logits_for_metrics, compute_metrics
 
 def parse_args():
     '''Parse arguments'''
@@ -174,7 +176,9 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        data_collator=data_collator
+        data_collator=data_collator,
+        compute_metrics=partial(compute_metrics, tokenizer=processor.tokenizer),
+        preprocess_logits_for_metrics=preprocess_logits_for_metrics
     )
     print("Starting Trainer.train()")
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
