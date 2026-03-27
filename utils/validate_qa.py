@@ -15,7 +15,7 @@ BATCH_OUTPUT_FILE = "../data/raw/batch_results.jsonl"
 FINAL_DATASET_DIR = "../data/datasets"
 
 # Dataset variations
-INCLUDE_LIDAR = True        # Set false for Image + BEV only
+INCLUDE_LIDAR = False        # Set false for Image + BEV only
 V2X = True                  # Set false for ego-vehicle only
 COT = True                  # Set false for no chain-of-thought
 
@@ -254,13 +254,15 @@ def main():
     for split in splits:
         print(f"\nProcessing Split: {split.upper()}")
         
-        # Prefer the BEV metrics file (written by generate_bev.py) since it
-        # contains bev_path fields; fall back to the original if absent.
-        bev_metrics_path = os.path.join(METRICS_DIR, f"{split}_bev_metrics.json")
-        ground_truth_path = bev_metrics_path if os.path.exists(bev_metrics_path) \
-            else os.path.join(METRICS_DIR, f"{split}_metrics.json")
+        if INCLUDE_LIDAR:
+            ground_truth_path = os.path.join(METRICS_DIR, f"{split}_metrics.json")
+            label = "LIDAR-MODE"
+        else:
+            ground_truth_path = os.path.join(METRICS_DIR, f"{split}_bev_metrics.json")
+            label = "BEV-MODE"
+
         if not os.path.exists(ground_truth_path):
-            print(f"Warning: {ground_truth_path} not found. Skipping {split}.")
+            print(f"[ERROR] {label} requires {ground_truth_path} but it's missing!")
             continue
 
         # Load ground truth for specific splits

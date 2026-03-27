@@ -140,7 +140,11 @@ def process_split(split, metrics_path):
         rel_bev_path  = f"./data/{split}/bev/{out_filename}"
 
         # Always record the path even if the image already exists
-        frame['bev_path'] = rel_bev_path
+        if 'images' not in frame:
+            frame['images'] = {}
+        frame['images']['bev_bird_eye_view'] = rel_bev_path
+
+        frame.pop('lidar_files', None)
 
         if os.path.exists(out_path):
             generated += 1
