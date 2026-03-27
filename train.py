@@ -2,8 +2,8 @@ import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import argparse
 import torch
-from transformers import AutoProcessor, TrainingArguments, Trainer
-from peft import LoraConfig, get_peft_model
+from transformers import AutoProcessor, TrainingArguments, Trainer, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from safetensors.torch import save_file, load_file
 
 # Custom modules
@@ -48,8 +48,15 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
     special_tokens_dict = {'additional_special_tokens': ['<think>', '</think>']}
     num_added_toks = processor.tokenizer.add_special_tokens(special_tokens_dict)
 
-    print(f"Loading D2V2X Model...")
-    d2v2x_model = D2V2XModel(qwen_path, mode)
+    print(f"Loading D2V2X Model in 4 bit...")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16
+    )
+
+    d2v2x_model = D2V2XModel(qwen_path, mode, quantization_config=bnb_config)
 
     if num_added_toks > 0:
         d2v2x_model.model.resize_token_embeddings(len(processor.tokenizer))
@@ -73,8 +80,8 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
 
     if stage ==2:
         print("Applying LoRA Config...")
-        lora_config = LoraConfig(r=256,
-                                 lora_alpha=16,
+        lora_config = LoraConfig(r=64,
+                                 lora_alpha=128,
                                  target_modules="all-linear",
                                  modules_to_save=["embed_tokens", "lm_head"]
                                 )

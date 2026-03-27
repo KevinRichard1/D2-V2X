@@ -6,17 +6,18 @@ from .adapter import LiDARMLP, inject_lidar_embeddings
 class D2V2XModel(nn.Module):
     '''Wrapper class for the D2-V2X architecture'''
 
-    def __init__(self, model_path: str, mode):
+    def __init__(self, model_path: str, mode, quantization_config=None):
         '''Initializes the base VLM and the custom LiDAR adapter'''
         super().__init__()
         
         self.mode = mode
         self.model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_path,
-            torch_dtype="auto",
-            device_map="auto",
             attn_implementation="sdpa",
-            trust_remote_code=True
+            trust_remote_code=True,
+            quantization_config=quantization_config,
+            device_map={"": 0},
+            torch_dtype=torch.bfloat16
         )
 
         # Initialize adapter if needed
