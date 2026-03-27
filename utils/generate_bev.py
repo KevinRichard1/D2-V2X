@@ -1,17 +1,4 @@
-'''Generate Bird's Eye View (BEV) images from LiDAR point clouds.
-
-Reads metrics JSON files produced by parse_data.py, loads the corresponding
-registered PCD file for each frame, rasterizes the point cloud into a
-height-coloured top-down image, overlays annotated bounding boxes, and saves
-the result as a PNG.  The bev_path for each frame is written into a new
-*_bev_metrics.json file (leaving the original *_metrics.json intact) so
-that validate_qa.py can consume it without risk of data loss on crashes.
-
-Run order:
-    1. parse_data.py   -> data/metrics/{split}_metrics.json
-    2. generate_bev.py -> data/{split}/bev/*.png  +  bev_path added to metrics
-    3. validate_qa.py  -> Datasets/…
-'''
+'''Generate Bird's Eye View (BEV) images from LiDAR point clouds.'''
 import os
 import json
 import math
@@ -30,7 +17,7 @@ OUTPUT_BASE    = '../data'          # BEV images go to OUTPUT_BASE/{split}/bev/
 X_RANGE   = (-125.0, 125.0)  # metres along X (forward = +X)
 Y_RANGE   = (-125.0, 125.0)  # metres along Y (left   = +Y)
 Z_MIN     = -3.0              # metres – below this is treated as ground noise
-Z_MAX     =  5.0              # metres – colour scale ceiling
+Z_MAX     =  2.5              # metres – colour scale ceiling
 RESOLUTION = 0.2              # metres per pixel
 
 IMG_H = int((X_RANGE[1] - X_RANGE[0]) / RESOLUTION)   # 1250 px
@@ -59,6 +46,8 @@ HEADING_TO_YAW = {
     'facing south':   -math.pi / 2,
     'facing right':   -math.pi / 2,
 }
+
+DEBUG_MODE = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -105,53 +94,64 @@ def box_corners_pixels(x, y, length, width, yaw):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def rasterize_pcd(pcd_rel_path):
-    '''Load a PCD file and produce a height-coloured (IMG_H × IMG_W × 3) uint8 array.
-
-    Points are coloured by their Z value using the 'plasma' colormap.
-    When multiple points project to the same pixel, the highest Z wins.
-
-    Returns None if the file is missing or empty.
-    '''
+    # ── 1. Robust Path Resolution ────────────────────────────────────────────
     abs_path = os.path.normpath(os.path.join('../utils', pcd_rel_path))
     if not os.path.exists(abs_path):
-        # Also try path relative to project root
         abs_path = pcd_rel_path.replace('./', '../')
-    if not os.path.exists(abs_path):
+    if not os.path.exists(abs_path): 
         return None
 
-    pcd    = o3d.io.read_point_cloud(abs_path)
-    points = np.asarray(pcd.points)   # (N, 3)
-
-    if len(points) == 0:
+    # ── 2. Efficient PCD Loading ─────────────────────────────────────────────
+    pcd = o3d.io.read_point_cloud(abs_path)
+    points = np.asarray(pcd.points)
+    if points.size == 0: 
         return None
 
-    # ── Spatial filter ────────────────────────────────────────────────────────
-    mask = (
-        (points[:, 0] >= X_RANGE[0]) & (points[:, 0] < X_RANGE[1]) &
-        (points[:, 1] >= Y_RANGE[0]) & (points[:, 1] < Y_RANGE[1])
-    )
+    # ── 3. Spatial Filtering ─────────────────────────────────────────────────
+    mask = (points[:, 0] >= X_RANGE[0]) & (points[:, 0] < X_RANGE[1]) & \
+           (points[:, 1] >= Y_RANGE[0]) & (points[:, 1] < Y_RANGE[1])
     points = points[mask]
-    if len(points) == 0:
+    if points.size == 0: 
         return None
 
-    # ── Pixel mapping ─────────────────────────────────────────────────────────
+    # ── 4. Coordinate Mapping ────────────────────────────────────────────────
     cols = np.clip(((Y_RANGE[1] - points[:, 1]) / RESOLUTION).astype(np.int32), 0, IMG_W - 1)
     rows = np.clip(((X_RANGE[1] - points[:, 0]) / RESOLUTION).astype(np.int32), 0, IMG_H - 1)
 
-    # ── Max-Z rasterisation (sort ascending → later writes win) ───────────────
+    # ── 5. Max-Z Buffer (Vectorized Sort for Speed) ─────────────────────────
     z_grid = np.full((IMG_H, IMG_W), np.nan, dtype=np.float32)
-    order  = np.argsort(points[:, 2])
-    z_grid[rows[order], cols[order]] = points[order, 2]
+    indices = np.argsort(points[:, 2])
+    z_grid[rows[indices], cols[indices]] = points[indices, 2]
 
-    # ── Height → colour ───────────────────────────────────────────────────────
-    z_norm  = np.clip((z_grid - Z_MIN) / (Z_MAX - Z_MIN), 0.0, 1.0)
-    cmap    = plt.get_cmap('plasma')
-    rgb     = (cmap(z_norm)[:, :, :3] * 255).astype(np.uint8)
+    # ── 6. High-Contrast Height Normalization ────────────────────────────────
+    Z_VIS_MIN, Z_VIS_MAX = -1.3, 1.8 
+    
+    z_norm = np.zeros_like(z_grid)
+    
+    mask_low = (z_grid > -1.2) & (z_grid <= 0.0)
+    z_norm[mask_low] = 0.3
+    
+    mask_car = (z_grid > 0.0) & (z_grid <= 1.6)
+    z_norm[mask_car] = 0.6
+    
+    mask_tall = (z_grid > 1.6)
+    z_norm[mask_tall] = 1.0
+    
+    cmap = plt.get_cmap('plasma')
+    rgb = (cmap(z_norm)[:, :, :3] * 255).astype(np.uint8)
 
-    # Black background for pixels with no points
-    no_pts = np.isnan(z_grid)
-    rgb[no_pts] = 0
+    # ── 7. Ground Plane Tint ────────────────────────────────────────────────
+    road_mask = (z_grid <= Z_VIS_MIN) & ~np.isnan(z_grid)
+    rgb[road_mask] = [20, 20, 40] 
 
+    rgb[np.isnan(z_grid)] = 0
+
+    weights = np.zeros((IMG_H, IMG_W))
+    np.add.at(weights, (rows[indices], cols[indices]), 1)
+    weights = np.clip(weights / 5.0, 0.0, 0.3)
+    
+    rgb = np.clip(rgb + (weights[:, :, None] * 255), 0, 255).astype(np.uint8)
+    
     return rgb
 
 
@@ -228,8 +228,24 @@ def generate_bev_image(pcd_path, objects, output_path):
     oc, or_ = world_to_pixel(0, 0)
     ax.plot(oc, or_, 'w+', markersize=10, markeredgewidth=2)
 
+    # ── Grid Overlay (Distance Anchors) ──────────────────────────────────────
+    for d in range(-120, 121, 20):
+        c, _ = world_to_pixel(0, d)
+        ax.axvline(c, color='white', alpha=0.1, linewidth=0.5)
+        _, r = world_to_pixel(d, 0)
+        ax.axhline(r, color='white', alpha=0.1, linewidth=0.5)
+
+    # ── Radial Distance Rings ────────────────────────────────────────────────
+    for radius in [25, 50, 75, 100]:
+        circle = plt.Circle((oc, or_), radius / RESOLUTION, color='white', 
+                            fill=False, alpha=0.2, linestyle='--', linewidth=0.5)
+        ax.add_artist(circle)
+        ax.text(oc, or_ - (radius / RESOLUTION), f"{radius}m", 
+                color='white', alpha=0.4, fontsize=4, ha='center', va='bottom')
+
     # ── Annotated boxes ───────────────────────────────────────────────────────
-    draw_boxes(ax, objects)
+    if DEBUG_MODE:
+        draw_boxes(ax, objects)
 
     # ── Scale bar (10 m) ──────────────────────────────────────────────────────
     bar_px  = int(10 / RESOLUTION)    # 10 m in pixels
@@ -242,6 +258,12 @@ def generate_bev_image(pcd_path, objects, output_path):
     # ── Direction label ───────────────────────────────────────────────────────
     ax.text(IMG_W // 2, 12, 'FORWARD  (+X)',
             color='white', fontsize=6, ha='center', va='top')
+    
+    C_SIZE = 500 # pixels (100 meters at 0.2 res)
+    center_r, center_c = IMG_H // 2, IMG_W // 2
+    
+    ax.set_xlim(center_c - C_SIZE//2, center_c + C_SIZE//2)
+    ax.set_ylim(center_r + C_SIZE//2, center_r - C_SIZE//2)
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     plt.savefig(output_path, bbox_inches=None, pad_inches=0,
