@@ -10,7 +10,6 @@ def run_inference(model, processor, dataset, output_file):
     model.eval()
     results = []
 
-    
     for idx in tqdm(range(len(dataset)), desc="Generating Predictions"):
         messages, lidar_tensors, sample_id = dataset[idx]
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -63,13 +62,36 @@ def run_inference(model, processor, dataset, output_file):
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=4)
 
-def run_evaluation(prediction_file, tokenizer):
+def run_evaluation(prediction_file, tokenizer, gt_file_path=None):
     with open(prediction_file, 'r') as f:
         data = json.load(f)
+
+    raw_preds = []
+    raw_gts = []
     
     # Extract strings from JSON
-    raw_preds = [item['prediction'] for item in data]
-    raw_gts = [item['ground_truth'] for item in data]
+    if isinstance(data, dict):
+        if not gt_file_path:
+            raise ValueError("Original dataset JSON pathis required to evaluate zero-shot predictions.")
+        
+        with open(gt_file_path, 'r', encoding='utf-8') as f:
+            gt_dataset = json.load(f)
+        
+        # Create lookup map for ground truths by ID
+        gt_map = {}
+        for item in gt_dataset:
+            sample_id = str(item.get('id', ''))
+            conversations = item.get('conversations', [])
+            if len(conversations) > 1:
+                gt_map[sample_id] = conversations[1].get('value', '')
+
+        # Pair predictions with ground truths
+        for sample_id, pred_text in data.items():
+            raw_preds.append(pred_text)
+            raw_gts.append(gt_map.get(str(sample_id), ""))
+    elif isinstance(data, list):
+        raw_preds = [item['prediction'] for item in data]
+        raw_gts = [item['ground_truth'] for item in data]
 
     # Convert to token IDs
     encoded_preds = tokenizer(raw_preds, padding=True, return_tensors="np").input_ids
@@ -80,12 +102,9 @@ def run_evaluation(prediction_file, tokenizer):
     results = compute_metrics(eval_pred, tokenizer)
     
     print("--- Evaluation Results ---")
-    if 'eval_Rationale_BERTScore' in results:
-        print(f"Rationale BERTScore: {results['eval_Rationale_BERTScore']}")
-    print(f"mIoU: {results['eval_mIoU']}")
-    print(f"MAE: {results['eval_MAE']}")
-    print(f"F1: {results['eval_F1']}")
-    
+    for key, value in sorted(results.items()):
+        display_name = key.replace("eval_", "").replace("_", " ").title()
+        print(f"{display_name:<30}: {value:.4f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -94,9 +113,9 @@ if __name__ == "__main__":
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--mode", type=str, default="d2v2x") # bev, ego, nocot
 
-    parser.add_argument("--json_path", type=str, default="../data/datasets/d2_v2x_test.json")
-    parser.add_argument("--data_root", type=str, default="../data/val/images")
-    parser.add_argument("--feature_dir", type=str, default="../data/tumtraf_features")
+    parser.add_argument("--json_path", type=str, default="./data/datasets/d2_v2x_test.json")
+    parser.add_argument("--data_root", type=str, default="./data/val/images")
+    parser.add_argument("--feature_dir", type=str, default="./data/tumtraf_features")
     parser.add_argument("--inference_save_path", default="results.json")
 
     args = parser.parse_args()
@@ -105,7 +124,7 @@ if __name__ == "__main__":
     processor = AutoProcessor.from_pretrained(args.checkpoint_path)
     processor.tokenizer.padding_side = "left"
 
-    output_file = f"{args.mode}_{args.inference_save_path}"
+    output_file = args.inference_save_path
 
     if args.inference:
         # Load dataset and model
@@ -132,4 +151,4 @@ if __name__ == "__main__":
     if args.eval:
         # Load tokenizer
         tokenizer = processor.tokenizer
-        run_evaluation(output_file, tokenizer)
+        run_evaluation(output_file, tokenizer, gt_file_path=args.json_path)
