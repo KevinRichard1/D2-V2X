@@ -2,3 +2,4 @@ data
 *.safetensors
 .env
 *.slurm
+__pycache__
