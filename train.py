@@ -11,7 +11,6 @@ from functools import partial
 from models.d2v2x_model import D2V2XModel
 from data_pipeline.dataset import D2V2XDataset
 from data_pipeline.collator import D2V2XDataCollator
-from utils.metrics import preprocess_logits_for_metrics, compute_metrics
 
 def parse_args():
     '''Parse arguments'''
@@ -59,6 +58,9 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
     )
 
     d2v2x_model = D2V2XModel(qwen_path, mode, quantization_config=bnb_config)
+    for m in d2v2x_model.modules():
+        if hasattr(m, "config") and hasattr(m.config, "use_cache"):
+            m.config.use_cache = False
 
     if num_added_toks > 0:
         d2v2x_model.model.resize_token_embeddings(len(processor.tokenizer))
@@ -73,7 +75,7 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
             if k.startswith("lidar_mlp."):
                 new_key = k.replace("lidar_mlp.", "", 1)
                 mlp_state_dict[new_key] = v
-                
+
         if len(mlp_state_dict) == 0:
             print("WARNING: No LiDAR MLP weights found in checkpoint")
         else:
@@ -166,8 +168,9 @@ def main():
         report_to=["wandb"],
         logging_steps=10,
         eval_strategy="epoch" if args.stage == 2 else "no",
-        save_strategy="epoch",
-        save_total_limit=2
+        save_strategy="steps",
+        save_steps=100,
+        save_total_limit=3,
     )
 
     # Initialize trainer
@@ -176,13 +179,11 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        data_collator=data_collator,
-        compute_metrics=partial(compute_metrics, tokenizer=processor.tokenizer),
-        preprocess_logits_for_metrics=preprocess_logits_for_metrics
+        data_collator=data_collator
     )
     print("Starting Trainer.train()")
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
-    
+
     final_save_dir = f"{args.output_path}/final_model"
     os.makedirs(final_save_dir, exist_ok=True)
 

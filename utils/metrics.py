@@ -4,6 +4,7 @@ import json
 import numpy as np
 from sklearn.metrics import f1_score
 from scipy.optimize import linear_sum_assignment
+from bert_score import score as calc_bert_score
 
 def preprocess_logits_for_metrics(logits, labels):
     if isinstance(logits, tuple):
@@ -20,8 +21,21 @@ def extract_json_from_text(text):
     except json.JSONDecodeError:
         return None
     
+def extract_rationale_from_text(text):
+    '''Extracts rationale'''
+    parts = text.split("```json")
+    if len(parts) > 0:
+        rationale = parts[0].strip()
+        return rationale if rationale else "No rationale provided."
+    return "No rationale provided."
+
 def calculate_iou(box1, box2):
     '''Calculates Intersection over Union for two bounding boxes'''
+    if not isinstance(box1, (list, tuple)) or len(box1) != 4:
+        return 0.0
+    if not isinstance(box2, (list, tuple)) or len(box2) != 4:
+        return 0.0
+    
     x_left = max(box1[0], box2[0])
     y_top = max(box1[1], box2[1])
     x_right = min(box1[2], box2[2])
@@ -33,14 +47,19 @@ def calculate_iou(box1, box2):
     intersection_area = (x_right - x_left) * (y_bottom - y_top)
     box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
     box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
-    iou = intersection_area / float(box1_area + box2_area - intersection_area)
-    return iou
+
+    union_area = float(box1_area + box2_area - intersection_area)
+    if union_area <= 0:
+        return 0.0
     
+    iou = intersection_area / union_area
+    return iou
+
 def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0):
     '''Pair Predicted boxes to ground truth boxes'''
     N = len(gt_objects)
     M = len(pred_objects)
-    
+
     scene_ious = []
     scene_maes = []
 
@@ -76,7 +95,7 @@ def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0):
     for gt_idx, pred_idx in zip(row_ind, col_ind):
         iou = iou_matrix[gt_idx, pred_idx]
         scene_ious.append(iou)
-        
+
         if iou > 0:
             gt_dist = gt_objects[gt_idx].get("distance_m", 0.0)
             pred_dist = pred_objects[pred_idx].get("distance_m", 0.0)
@@ -104,11 +123,15 @@ def compute_metrics(eval_pred, tokenizer):
     '''Evaluate custom metrics'''
     # Unpack and convert logits to token IDs
     preds, labels = eval_pred
-    labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+    preds = np.where(preds != -100, preds, pad_id)
+    labels = np.where(labels != -100, labels, pad_id)
 
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-    
+
+    gt_rationales = []
+    pred_rationales = []
     iou_scores = []
     mae_scores = []
     y_true_decisions = []
@@ -121,10 +144,13 @@ def compute_metrics(eval_pred, tokenizer):
         if not label_json:
             continue
 
+        pred_rationales.append(extract_rationale_from_text(pred_text))
+        gt_rationales.append(extract_rationale_from_text(label_text))
+
         # F1 for decisions
         gt_decision = label_json.get("decision", "").lower()
         y_true_decisions.append(gt_decision)
-        
+
         if pred_json and "decision" in pred_json:
             y_pred_decisions.append(pred_json["decision"].lower())
         else:
@@ -139,6 +165,17 @@ def compute_metrics(eval_pred, tokenizer):
         iou_scores.extend(scene_ious)
         mae_scores.extend(scene_maes)
 
+    bert_f1_mean = 0.0
+    if pred_rationales and gt_rationales:
+        P, R, F1 = calc_bert_score(
+            pred_rationales, 
+            gt_rationales, 
+            lang="en", 
+            verbose=False, 
+            model_type="distilbert-base-uncased"
+        )
+        bert_f1_mean = F1.mean().item()
+
     mIoU = np.mean(iou_scores) if iou_scores else 0.0
     MAE = np.mean(mae_scores) if mae_scores else 0.0
 
@@ -146,8 +183,9 @@ def compute_metrics(eval_pred, tokenizer):
         F1 = f1_score(y_true_decisions, y_pred_decisions, average='macro', zero_division=0)
     else:
         F1 = 0.0
-    
+
     return {
+        "eval_Rationale_BERTScore": round(float(bert_f1_mean), 4),
         "eval_mIoU": round(float(mIoU), 4),
         "eval_MAE": round(float(MAE), 4),
         "eval_F1": round(float(F1), 4)
