@@ -4,7 +4,7 @@ import json
 import torch
 from torch.utils.data import DataLoader
 from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
-from utils.dataset import D2V2XDataset
+from data_pipeline.dataset import D2V2XDataset
 from tqdm import tqdm
 import argparse
 
@@ -31,7 +31,6 @@ def run_zero_shot(args):
         args.json_path,
         args.data_root,
         args.feature_dir,
-        processor,
         mode=["image_only", "zero_shot"],
         is_training=False
     )

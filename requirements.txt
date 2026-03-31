@@ -1,3 +1,6 @@
 # Requirements for the main project
 transformers
 accelerate
+peft
+wandb
+bitsandbytes
