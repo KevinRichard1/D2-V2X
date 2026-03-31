@@ -7,10 +7,9 @@ from torch.utils.data import Dataset
 from safetensors.torch import load_file
 
 class D2V2XDataset(Dataset):
-    def __init__(self, json_path, data_root, feature_dir, processor, mode, is_training):
+    def __init__(self, json_path, data_root, feature_dir, mode, is_training):
         self.data_root = Path(data_root)
         self.feature_dir = Path(feature_dir)
-        self.processor = processor
         if isinstance(mode, str):
             self.mode = [mode]
         else:
@@ -44,7 +43,8 @@ class D2V2XDataset(Dataset):
             user_query = user_query.replace("<lidar>", "[LiDAR data not available]")
         else:
             safetensor_path = self.feature_dir / f"{sample_id}.safetensors"
-            lidar_tensors = load_file(safetensor_path)
+            safetensor_dict = load_file(safetensor_path)
+            lidar_tensors = safetensor_dict['neck_features']
 
         if "zero_shot" in self.mode:
             instruction = (
