@@ -4,3 +4,4 @@ accelerate
 peft
 wandb
 bitsandbytes
+bert-score

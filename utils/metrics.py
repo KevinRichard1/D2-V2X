@@ -108,28 +108,53 @@ def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0):
 
     scene_ious = []
     scene_maes = []
+    occlusion_correct = []
+    occlusion_total = []
 
     # Hallucination
     if N == 0 and M > 0:
-        return [0.0] * M, []
+        for pred in pred_objects:
+            if len(pred.get("bbox", [])) == 4:
+                scene_ious.append(0.0)
+        return scene_ious, [penalty_dist] * M, occlusion_correct, occlusion_total
 
     # Missed Detection
     if N > 0 and M == 0:
-        return [0.0] * N, [penalty_dist] * N
+        for gt in gt_objects:
+            scene_maes.append(penalty_dist)
+            if len(gt.get("bbox", [])) == 4:
+                scene_ious.append(0.0)
+            else:
+                occlusion_total.append(1)
+                occlusion_correct.append(0)
+        return scene_ious, scene_maes, occlusion_correct, occlusion_total
 
     # Empty scene
     if N == 0 and M == 0:
-        return [], []
+        return [], [], [], []
 
     # Cost Matrix
     iou_matrix = np.zeros((N, M))
     for i in range(N):
         for j in range(M):
-            gt_box = gt_objects[i].get("bbox", [0, 0, 0, 0])
-            pred_box = pred_objects[j].get("bbox", [0, 0, 0, 0])
+            gt_box = gt_objects[i].get("bbox", [])
+            pred_box = pred_objects[j].get("bbox", [])
             iou_matrix[i, j] = calculate_iou(gt_box, pred_box)
-
-    cost_matrix = 1.0 - iou_matrix
+    
+    cost_matrix = np.zeros((N, M))
+    for i in range(N):
+        for j in range(M):
+            gt_box = gt_objects[i].get("bbox", [])
+            
+            if len(gt_box) == 4:
+                cost_matrix[i, j] = 1.0 - iou_matrix[i, j]
+            else:
+                gt_dist = gt_objects[i].get("distance_m", 0.0)
+                pred_dist = pred_objects[j].get("distance_m", 0.0)
+                dist_diff = abs(gt_dist - pred_dist)
+                
+                type_penalty = 0 if gt_objects[i].get("type") == pred_objects[j].get("type") else 100.0
+                cost_matrix[i, j] = dist_diff + type_penalty
 
     # Matching
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
@@ -139,15 +164,31 @@ def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0):
 
     # Process optimal pairs
     for gt_idx, pred_idx in zip(row_ind, col_ind):
+        gt_box = gt_objects[gt_idx].get("bbox", [])
+        pred_box = pred_objects[pred_idx].get("bbox", [])
         iou = iou_matrix[gt_idx, pred_idx]
-        scene_ious.append(iou)
+        
+        gt_dist = gt_objects[gt_idx].get("distance_m", 0.0)
+        pred_dist = pred_objects[pred_idx].get("distance_m", 0.0)
+        classes_match = (gt_objects[gt_idx].get("type") == pred_objects[pred_idx].get("type"))
 
-        if iou > 0:
-            gt_dist = gt_objects[gt_idx].get("distance_m", 0.0)
-            pred_dist = pred_objects[pred_idx].get("distance_m", 0.0)
-            scene_maes.append(abs(gt_dist - pred_dist))
+        if len(gt_box) == 4:
+            scene_ious.append(iou)
+            if iou == 0 and not classes_match:
+                 scene_maes.append(penalty_dist)
+            else:
+                 scene_maes.append(abs(gt_dist - pred_dist))
         else:
-            scene_maes.append(penalty_dist)
+            occlusion_total.append(1)
+            if len(pred_box) == 0 or len(pred_box) != 4:
+                occlusion_correct.append(1)
+            else:
+                occlusion_correct.append(0) 
+            
+            if not classes_match:
+                 scene_maes.append(penalty_dist)
+            else:
+                 scene_maes.append(abs(gt_dist - pred_dist))
 
         matched_gt.add(gt_idx)
         matched_pred.add(pred_idx)
@@ -155,15 +196,22 @@ def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0):
     # Penalize missed objects
     for i in range(N):
         if i not in matched_gt:
-            scene_ious.append(0.0)
+            gt_box = gt_objects[i].get("bbox", [])
             scene_maes.append(penalty_dist)
+            if len(gt_box) == 4:
+                scene_ious.append(0.0)
+            else:
+                occlusion_total.append(1)
+                occlusion_correct.append(0)
 
     # Penalize hallucinations
     for j in range(M):
         if j not in matched_pred:
-            scene_ious.append(0.0)
+            pred_box = pred_objects[j].get("bbox", [])
+            if len(pred_box) == 4:
+                scene_ious.append(0.0)
 
-    return scene_ious, scene_maes
+    return scene_ious, scene_maes, occlusion_correct, occlusion_total
 
 def compute_metrics(eval_pred, tokenizer):
     '''Evaluate custom metrics'''
@@ -178,7 +226,7 @@ def compute_metrics(eval_pred, tokenizer):
 
     valid_tasks = list(VALID_TASK_TYPES) + ["all"]
     buckets = {
-        tt: {"iou": [], "mae": [], "true_dec": [], "pred_dec": [], "gt_rat": [], "pred_rat": []} 
+        tt: {"iou": [], "mae": [], "occ_correct": [], "occ_total": [], "true_dec": [], "pred_dec": [], "gt_rat": [], "pred_rat": []} 
         for tt in valid_tasks
     }
 
@@ -204,7 +252,8 @@ def compute_metrics(eval_pred, tokenizer):
 
         gt_objects = label_json.get("grounded_objects", [])
         pred_objects = pred_json.get("grounded_objects", []) if pred_json else []
-        scene_ious, scene_maes = get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0)
+
+        scene_ious, scene_maes, occ_corr, occ_tot = get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0)
 
         # Append to relevant buckets
         for b in target_buckets:
@@ -214,6 +263,8 @@ def compute_metrics(eval_pred, tokenizer):
             buckets[b]["pred_rat"].append(pred_rat)
             buckets[b]["iou"].extend(scene_ious)
             buckets[b]["mae"].extend(scene_maes)
+            buckets[b]["occ_correct"].extend(occ_corr)
+            buckets[b]["occ_total"].extend(occ_tot)
 
     final_results = {}
 
@@ -221,9 +272,12 @@ def compute_metrics(eval_pred, tokenizer):
         if not data["true_dec"]:
             continue
             
-        mIoU = np.mean(data["iou"]) if data["iou"] else 0.0
+        Visible_mIoU = np.mean(data["iou"]) if data["iou"] else 0.0
         MAE = np.mean(data["mae"]) if data["mae"] else 0.0
         F1 = f1_score(data["true_dec"], data["pred_dec"], average='macro', zero_division=0)
+
+        total_occluded = sum(data["occ_total"])
+        Occ_Acc = sum(data["occ_correct"]) / total_occluded if total_occluded > 0 else 0.0
 
         bert_f1_mean = 0.0
         if data["pred_rat"] and data["gt_rat"]:
@@ -237,7 +291,8 @@ def compute_metrics(eval_pred, tokenizer):
             bert_f1_mean = B_F1.mean().item()
 
         # Save
-        final_results[f"eval_{b}_mIoU"] = round(float(mIoU), 4)
+        final_results[f"eval_{b}_Visible_mIoU"] = round(float(Visible_mIoU), 4)
+        final_results[f"eval_{b}_Occlusion_Acc"] = round(float(Occ_Acc), 4)
         final_results[f"eval_{b}_MAE"] = round(float(MAE), 4)
         final_results[f"eval_{b}_F1"] = round(float(F1), 4)
         final_results[f"eval_{b}_Rationale_BERTScore"] = round(float(bert_f1_mean), 4)
