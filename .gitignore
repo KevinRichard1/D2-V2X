@@ -2,3 +2,5 @@ data
 *.safetensors
 .env
 *.slurm
+__pycache__
+final_model

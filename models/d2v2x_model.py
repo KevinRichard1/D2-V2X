@@ -1,18 +1,20 @@
+import os
 import torch
 import torch.nn as nn
+from safetensors.torch import load_file
 from transformers import Qwen3VLForConditionalGeneration
 from .adapter import LiDARMLP, inject_lidar_embeddings
 
 class D2V2XModel(nn.Module):
     '''Wrapper class for the D2-V2X architecture'''
 
-    def __init__(self, model_path: str, mode, quantization_config=None):
+    def __init__(self, base_model_path: str, adapter_path:str, mode, quantization_config=None):
         '''Initializes the base VLM and the custom LiDAR adapter'''
         super().__init__()
         
         self.mode = mode
         self.model = Qwen3VLForConditionalGeneration.from_pretrained(
-            model_path,
+            base_model_path,
             attn_implementation="sdpa",
             trust_remote_code=True,
             quantization_config=quantization_config,
@@ -20,7 +22,11 @@ class D2V2XModel(nn.Module):
             torch_dtype=torch.bfloat16
         )
 
-        # Initialize adapter if needed
+        if adapter_path and os.path.exists(adapter_path):
+            print(f"Loading LoRA adapters from {adapter_path}...")
+            self.model.load_adapter(adapter_path)
+
+        # Initialize MLP if needed
         if self.mode in ['ego', 'v2x']:
             text_out = self.model.config.text_config.hidden_size
 
@@ -29,6 +35,16 @@ class D2V2XModel(nn.Module):
                 hidden_dim=2048,
                 output_dim=text_out
             )
+
+            # Load pretrained weights
+            mlp_path = os.path.join(os.path.dirname(adapter_path), "lidar_mlp.safetensors")
+            
+            if os.path.exists(mlp_path):
+                print(f"Loading LiDAR MLP weights from {mlp_path}...")
+                mlp_state_dict = load_file(mlp_path)
+                self.lidar_mlp.load_state_dict(mlp_state_dict)
+            else:
+                print(f"WARNING: No LiDAR MLP weights found at {mlp_path}")
 
             self.lidar_mlp.to(
                 device=self.model.device, 
@@ -97,7 +113,6 @@ class D2V2XModel(nn.Module):
     def generate(
         self, 
         input_ids: torch.Tensor, 
-        images: list = None, 
         lidar_features: torch.Tensor = None, 
         **kwargs
     ):
@@ -106,7 +121,6 @@ class D2V2XModel(nn.Module):
             # Image only text generation
             return self.model.generate(
                 input_ids=input_ids,
-                images=images,
                 **kwargs
             )
         elif self.mode in ['ego', 'v2x']:
@@ -125,11 +139,11 @@ class D2V2XModel(nn.Module):
                 lidar_token_id=151669
             )
 
+            kwargs.pop('input_ids', None)
+
             # Text generation with LiDAR embeddings
             return self.model.generate(
                 inputs_embeds=inputs_embeds,
-                attention_mask=kwargs.get('attention_mask', None),
-                images=images,
                 **kwargs
             )
         else:

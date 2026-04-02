@@ -6,6 +6,45 @@ from sklearn.metrics import f1_score
 from scipy.optimize import linear_sum_assignment
 from bert_score import score as calc_bert_score
 
+VALID_TASK_TYPES  = {"maneuver", "counting", "spatial"}
+
+DECISION_SYNONYMS = {
+    # yield variants
+    "stop": "yield", "wait": "yield", "halt": "yield", "brake": "yield",
+    "do not proceed": "yield", "do_not_proceed": "yield", "not clear": "yield",
+    "not_clear": "yield", "path_not_clear": "yield", "not_safe": "yield",
+    "do not merge": "yield", "do_not_merge": "yield", "do not switch lanes": "yield",
+    "do_not_switch_lane": "yield", "do not turn": "yield", "do_not_turn": "yield",
+    "avoid": "yield",
+    # monitor variants
+    "proceed": "monitor", "continue": "monitor", "go": "monitor",
+    "proceed_with_caution": "monitor", "caution": "monitor",
+    "maintain": "monitor", "maintain_speed": "monitor",
+    "maintain distance": "monitor", "check": "monitor",
+    "observe": "monitor", "analyze": "monitor", "detect": "monitor",
+    "pass": "monitor",
+    # safe variants
+    "clear": "safe", "no_hazard": "safe", "no hazard": "safe",
+    "no_hidden_vehicles": "safe", "no hidden vehicles": "safe",
+    "no_hidden_cars": "safe", "no hidden cars": "safe",
+    "no_hidden_trucks": "safe", "no hidden truck": "safe",
+    "no_hidden_pedestrians": "safe", "no hidden pedestrians": "safe",
+    "no_occluded": "safe", "no_occlusion": "safe", "no_occlusions": "safe",
+    "no_obstacle": "safe", "no_obstruction": "safe",
+    "zero_hidden": "safe", "zero hidden vehicles": "safe",
+    "no_block": "safe", "no_concealment": "safe",
+    "yes": "safe",
+    # unsafe variants
+    "hidden_vehicles": "unsafe", "hidden_cars": "unsafe",
+    "hidden_pedestrians": "unsafe", "hidden_pedestrian": "unsafe",
+    "hidden_car": "unsafe", "hidden_buses": "unsafe",
+    "occluded": "unsafe", "occlusion_detected": "unsafe",
+    "occluded_vehicle": "unsafe", "obscured_vehicles": "unsafe",
+    "hidden": "unsafe", "detected": "unsafe",
+    "no": "unsafe", "alert": "unsafe", "unsafe": "unsafe",
+    "not visible": "unsafe",
+}
+
 def preprocess_logits_for_metrics(logits, labels):
     if isinstance(logits, tuple):
         logits = logits[0]
@@ -28,6 +67,13 @@ def extract_rationale_from_text(text):
         rationale = parts[0].strip()
         return rationale if rationale else "No rationale provided."
     return "No rationale provided."
+
+def normalize_decision(raw):
+    '''Remap a raw decision string'''
+    if raw is None:
+        return "invalid_decision"
+    raw = str(raw).strip().lower()
+    return DECISION_SYNONYMS.get(raw, raw)
 
 def calculate_iou(box1, box2):
     '''Calculates Intersection over Union for two bounding boxes'''
@@ -62,28 +108,53 @@ def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0):
 
     scene_ious = []
     scene_maes = []
+    occlusion_correct = []
+    occlusion_total = []
 
     # Hallucination
     if N == 0 and M > 0:
-        return [0.0] * M, []
+        for pred in pred_objects:
+            if len(pred.get("bbox", [])) == 4:
+                scene_ious.append(0.0)
+        return scene_ious, [penalty_dist] * M, occlusion_correct, occlusion_total
 
     # Missed Detection
     if N > 0 and M == 0:
-        return [0.0] * N, [penalty_dist] * N
+        for gt in gt_objects:
+            scene_maes.append(penalty_dist)
+            if len(gt.get("bbox", [])) == 4:
+                scene_ious.append(0.0)
+            else:
+                occlusion_total.append(1)
+                occlusion_correct.append(0)
+        return scene_ious, scene_maes, occlusion_correct, occlusion_total
 
     # Empty scene
     if N == 0 and M == 0:
-        return [], []
+        return [], [], [], []
 
     # Cost Matrix
     iou_matrix = np.zeros((N, M))
     for i in range(N):
         for j in range(M):
-            gt_box = gt_objects[i].get("bbox", [0, 0, 0, 0])
-            pred_box = pred_objects[j].get("bbox", [0, 0, 0, 0])
+            gt_box = gt_objects[i].get("bbox", [])
+            pred_box = pred_objects[j].get("bbox", [])
             iou_matrix[i, j] = calculate_iou(gt_box, pred_box)
-
-    cost_matrix = 1.0 - iou_matrix
+    
+    cost_matrix = np.zeros((N, M))
+    for i in range(N):
+        for j in range(M):
+            gt_box = gt_objects[i].get("bbox", [])
+            
+            if len(gt_box) == 4:
+                cost_matrix[i, j] = 1.0 - iou_matrix[i, j]
+            else:
+                gt_dist = gt_objects[i].get("distance_m", 0.0)
+                pred_dist = pred_objects[j].get("distance_m", 0.0)
+                dist_diff = abs(gt_dist - pred_dist)
+                
+                type_penalty = 0 if gt_objects[i].get("type") == pred_objects[j].get("type") else 100.0
+                cost_matrix[i, j] = dist_diff + type_penalty
 
     # Matching
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
@@ -93,15 +164,31 @@ def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0):
 
     # Process optimal pairs
     for gt_idx, pred_idx in zip(row_ind, col_ind):
+        gt_box = gt_objects[gt_idx].get("bbox", [])
+        pred_box = pred_objects[pred_idx].get("bbox", [])
         iou = iou_matrix[gt_idx, pred_idx]
-        scene_ious.append(iou)
+        
+        gt_dist = gt_objects[gt_idx].get("distance_m", 0.0)
+        pred_dist = pred_objects[pred_idx].get("distance_m", 0.0)
+        classes_match = (gt_objects[gt_idx].get("type") == pred_objects[pred_idx].get("type"))
 
-        if iou > 0:
-            gt_dist = gt_objects[gt_idx].get("distance_m", 0.0)
-            pred_dist = pred_objects[pred_idx].get("distance_m", 0.0)
-            scene_maes.append(abs(gt_dist - pred_dist))
+        if len(gt_box) == 4:
+            scene_ious.append(iou)
+            if iou == 0 and not classes_match:
+                 scene_maes.append(penalty_dist)
+            else:
+                 scene_maes.append(abs(gt_dist - pred_dist))
         else:
-            scene_maes.append(penalty_dist)
+            occlusion_total.append(1)
+            if len(pred_box) == 0 or len(pred_box) != 4:
+                occlusion_correct.append(1)
+            else:
+                occlusion_correct.append(0) 
+            
+            if not classes_match:
+                 scene_maes.append(penalty_dist)
+            else:
+                 scene_maes.append(abs(gt_dist - pred_dist))
 
         matched_gt.add(gt_idx)
         matched_pred.add(pred_idx)
@@ -109,15 +196,22 @@ def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0):
     # Penalize missed objects
     for i in range(N):
         if i not in matched_gt:
-            scene_ious.append(0.0)
+            gt_box = gt_objects[i].get("bbox", [])
             scene_maes.append(penalty_dist)
+            if len(gt_box) == 4:
+                scene_ious.append(0.0)
+            else:
+                occlusion_total.append(1)
+                occlusion_correct.append(0)
 
     # Penalize hallucinations
     for j in range(M):
         if j not in matched_pred:
-            scene_ious.append(0.0)
+            pred_box = pred_objects[j].get("bbox", [])
+            if len(pred_box) == 4:
+                scene_ious.append(0.0)
 
-    return scene_ious, scene_maes
+    return scene_ious, scene_maes, occlusion_correct, occlusion_total
 
 def compute_metrics(eval_pred, tokenizer):
     '''Evaluate custom metrics'''
@@ -130,12 +224,11 @@ def compute_metrics(eval_pred, tokenizer):
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
-    gt_rationales = []
-    pred_rationales = []
-    iou_scores = []
-    mae_scores = []
-    y_true_decisions = []
-    y_pred_decisions = []
+    valid_tasks = list(VALID_TASK_TYPES) + ["all"]
+    buckets = {
+        tt: {"iou": [], "mae": [], "occ_correct": [], "occ_total": [], "true_dec": [], "pred_dec": [], "gt_rat": [], "pred_rat": []} 
+        for tt in valid_tasks
+    }
 
     for pred_text, label_text in zip(decoded_preds, decoded_labels):
         pred_json = extract_json_from_text(pred_text)
@@ -144,49 +237,64 @@ def compute_metrics(eval_pred, tokenizer):
         if not label_json:
             continue
 
-        pred_rationales.append(extract_rationale_from_text(pred_text))
-        gt_rationales.append(extract_rationale_from_text(label_text))
+        # Determine buckets
+        task_type = label_json.get("task_type", "unknown").lower()
+        target_buckets = ["all"]
+        if task_type in VALID_TASK_TYPES:
+            target_buckets.append(task_type)
 
-        # F1 for decisions
-        gt_decision = label_json.get("decision", "").lower()
-        y_true_decisions.append(gt_decision)
+        # Extract data
+        gt_decision = normalize_decision(label_json.get("decision"))
+        pred_decision = normalize_decision(pred_json.get("decision") if pred_json else None)
+        
+        gt_rat = extract_rationale_from_text(label_text)
+        pred_rat = extract_rationale_from_text(pred_text)
 
-        if pred_json and "decision" in pred_json:
-            y_pred_decisions.append(pred_json["decision"].lower())
-        else:
-            y_pred_decisions.append("invalid_decision")
-
-        # Get objects
         gt_objects = label_json.get("grounded_objects", [])
         pred_objects = pred_json.get("grounded_objects", []) if pred_json else []
 
-        scene_ious, scene_maes = get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0)
+        scene_ious, scene_maes, occ_corr, occ_tot = get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0)
 
-        iou_scores.extend(scene_ious)
-        mae_scores.extend(scene_maes)
+        # Append to relevant buckets
+        for b in target_buckets:
+            buckets[b]["true_dec"].append(gt_decision)
+            buckets[b]["pred_dec"].append(pred_decision)
+            buckets[b]["gt_rat"].append(gt_rat)
+            buckets[b]["pred_rat"].append(pred_rat)
+            buckets[b]["iou"].extend(scene_ious)
+            buckets[b]["mae"].extend(scene_maes)
+            buckets[b]["occ_correct"].extend(occ_corr)
+            buckets[b]["occ_total"].extend(occ_tot)
 
-    bert_f1_mean = 0.0
-    if pred_rationales and gt_rationales:
-        P, R, F1 = calc_bert_score(
-            pred_rationales, 
-            gt_rationales, 
-            lang="en", 
-            verbose=False, 
-            model_type="distilbert-base-uncased"
-        )
-        bert_f1_mean = F1.mean().item()
+    final_results = {}
 
-    mIoU = np.mean(iou_scores) if iou_scores else 0.0
-    MAE = np.mean(mae_scores) if mae_scores else 0.0
+    for b, data in buckets.items():
+        if not data["true_dec"]:
+            continue
+            
+        Visible_mIoU = np.mean(data["iou"]) if data["iou"] else 0.0
+        MAE = np.mean(data["mae"]) if data["mae"] else 0.0
+        F1 = f1_score(data["true_dec"], data["pred_dec"], average='macro', zero_division=0)
 
-    if y_true_decisions:
-        F1 = f1_score(y_true_decisions, y_pred_decisions, average='macro', zero_division=0)
-    else:
-        F1 = 0.0
+        total_occluded = sum(data["occ_total"])
+        Occ_Acc = sum(data["occ_correct"]) / total_occluded if total_occluded > 0 else 0.0
 
-    return {
-        "eval_Rationale_BERTScore": round(float(bert_f1_mean), 4),
-        "eval_mIoU": round(float(mIoU), 4),
-        "eval_MAE": round(float(MAE), 4),
-        "eval_F1": round(float(F1), 4)
-    }
+        bert_f1_mean = 0.0
+        if data["pred_rat"] and data["gt_rat"]:
+            _, _, B_F1 = calc_bert_score(
+                data["pred_rat"], 
+                data["gt_rat"], 
+                lang="en", 
+                verbose=False, 
+                model_type="distilbert-base-uncased"
+            )
+            bert_f1_mean = B_F1.mean().item()
+
+        # Save
+        final_results[f"eval_{b}_Visible_mIoU"] = round(float(Visible_mIoU), 4)
+        final_results[f"eval_{b}_Occlusion_Acc"] = round(float(Occ_Acc), 4)
+        final_results[f"eval_{b}_MAE"] = round(float(MAE), 4)
+        final_results[f"eval_{b}_F1"] = round(float(F1), 4)
+        final_results[f"eval_{b}_Rationale_BERTScore"] = round(float(bert_f1_mean), 4)
+
+    return final_results
