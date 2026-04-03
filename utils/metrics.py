@@ -106,6 +106,20 @@ def calculate_iou(box1, box2):
 
 def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0):
     '''Pair Predicted boxes to ground truth boxes'''
+    if not pred_objects:
+        pred_objects = []
+    
+    if isinstance(pred_objects, dict):
+        if "objects" in pred_objects and isinstance(pred_objects["objects"], list):
+            pred_objects = pred_objects["objects"]
+        else:
+            pred_objects = [pred_objects]
+
+    if not isinstance(pred_objects, list):
+        pred_objects = []
+
+    pred_objects = [obj for obj in pred_objects if isinstance(obj, dict)]
+
     N = len(gt_objects)
     M = len(pred_objects)
 
@@ -237,6 +251,8 @@ def compute_metrics(eval_pred, tokenizer):
         pred_json = extract_json_from_text(pred_text)
         label_json = extract_json_from_text(label_text)
 
+        if not isinstance(pred_json, dict):
+            pred_json = {}
         if not label_json:
             continue
 
