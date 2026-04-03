@@ -8,7 +8,7 @@ from .adapter import LiDARMLP, inject_lidar_embeddings
 class D2V2XModel(nn.Module):
     '''Wrapper class for the D2-V2X architecture'''
 
-    def __init__(self, base_model_path: str, adapter_path:str, mode, quantization_config=None):
+    def __init__(self, base_model_path: str, mode: str, adapter_path: str = None, quantization_config=None):
         '''Initializes the base VLM and the custom LiDAR adapter'''
         super().__init__()
         
@@ -37,14 +37,15 @@ class D2V2XModel(nn.Module):
             )
 
             # Load pretrained weights
-            mlp_path = os.path.join(os.path.dirname(adapter_path), "lidar_mlp.safetensors")
-            
-            if os.path.exists(mlp_path):
-                print(f"Loading LiDAR MLP weights from {mlp_path}...")
-                mlp_state_dict = load_file(mlp_path)
-                self.lidar_mlp.load_state_dict(mlp_state_dict)
-            else:
-                print(f"WARNING: No LiDAR MLP weights found at {mlp_path}")
+            if adapter_path is not None:
+                mlp_path = os.path.join(os.path.dirname(adapter_path), "lidar_mlp.safetensors")
+                
+                if os.path.exists(mlp_path):
+                    print(f"Loading LiDAR MLP weights from {mlp_path}...")
+                    mlp_state_dict = load_file(mlp_path)
+                    self.lidar_mlp.load_state_dict(mlp_state_dict)
+                else:
+                    print(f"WARNING: No LiDAR MLP weights found at {mlp_path}")
 
             self.lidar_mlp.to(
                 device=self.model.device, 
