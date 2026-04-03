@@ -62,10 +62,13 @@ def extract_json_from_text(text):
     
 def extract_rationale_from_text(text):
     '''Extracts rationale'''
+    match = re.search(r'<think>\s*(.*?)\s*</think>', text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    
     parts = text.split("```json")
     if len(parts) > 0:
-        rationale = parts[0].strip()
-        return rationale if rationale else "No rationale provided."
+        return parts[0].strip()
     return "No rationale provided."
 
 def normalize_decision(raw):
