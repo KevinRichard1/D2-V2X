@@ -7,11 +7,22 @@ class LiDARMLP(nn.Module):
         super().__init__()
 
         # Downsampling
-        self.pool = nn.AdaptiveAvgPool2d((32, 32))
+        self.spatial_stem = nn.Sequential(
+            nn.Conv2d(input_dim, hidden_dim, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(hidden_dim),
+            nn.GELU(),
+            
+            nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(hidden_dim),
+            nn.GELU(),
+            
+            nn.AdaptiveMaxPool2d((32, 32)) 
+        )
 
         # Define MLP
         self.mlp = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, output_dim)
         )
@@ -21,8 +32,8 @@ class LiDARMLP(nn.Module):
             raise ValueError(f"Expected 4D tensor, got {lidar_features.ndim}D")
         
         # Pool, flatten, and transpose features
-        pooled_features = self.pool(lidar_features)
-        flattened = pooled_features.flatten(start_dim=2)
+        lidar_features = self.spatial_stem(lidar_features)
+        flattened = lidar_features.flatten(start_dim=2)
         tokens = flattened.transpose(1, 2)
 
         proj_tensor = self.mlp(tokens)
