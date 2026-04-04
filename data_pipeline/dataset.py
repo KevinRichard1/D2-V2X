@@ -6,6 +6,19 @@ import torch
 from torch.utils.data import Dataset
 from safetensors.torch import load_file
 
+SYSTEM_PROMPT = (
+    "Analyze the scene and provide your response in two parts. "
+    "First, provide your reasoning enclosed in <think> and </think> tags. "
+    "Second, output the final decision in a markdown JSON block.\n\n"
+    "EXAMPLE FORMAT:\n"
+    "<think>\nBased on the images, I can see X approaching the intersection. The LiDAR indicates a high-velocity object...\n</think>\n"
+    "```json\n"
+    '{"decision": "yield", "hazard_level": "high", "count": 2, '
+    '"grounded_objects": [{"type": "pedestrian", "bbox": [10, 20, 30, 40]}]}\n'
+    "```\n\n"
+    "Now, provide your analysis and JSON for the current scene based on the user's question."
+)
+
 class D2V2XDataset(Dataset):
     def __init__(self, json_path, data_root, feature_dir, mode, is_training):
         self.data_root = Path(data_root)
@@ -46,21 +59,6 @@ class D2V2XDataset(Dataset):
             safetensor_dict = load_file(safetensor_path)
             lidar_tensors = safetensor_dict['neck_features']
 
-        if "zero_shot" in self.mode:
-            instruction = (
-                "\nAnalyze the scene and provide your response in two parts. "
-                "First, briefly explain your reasoning. Second, output the final decision in a markdown JSON block.\n\n"
-                "EXAMPLE FORMAT:\n"
-                "Based on the images, I can see X, Y, and Z...\n"
-                "```json\n"
-                '{"decision": "yield", "hazard_level": "high", "count": 2, '
-                '"grounded_objects": [{"type": "pedestrian", "bbox": [10, 20, 30, 40]}]}\n'
-                "```\n\n"
-                "Now, provide your analysis and JSON for the current images."
-            )
-
-            user_query += instruction
-
         # Format for Qwen
         user_content = [
             {"type": "image", "image": img} for img in images
@@ -68,6 +66,10 @@ class D2V2XDataset(Dataset):
         user_content.append({"type": "text", "text": user_query})
 
         messages = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": SYSTEM_PROMPT}]
+            },
             {
                 "role": "user",
                 "content": user_content

@@ -6,7 +6,9 @@
   "eos_token": "<|im_end|>",
   "errors": "replace",
   "extra_special_tokens": [
-    "<lidar>"
+    "<lidar>",
+    "<think>",
+    "</think>"
   ],
   "is_local": true,
   "model_max_length": 262144,

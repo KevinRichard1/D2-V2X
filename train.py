@@ -45,10 +45,6 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
     processor = AutoProcessor.from_pretrained(qwen_path, local_files_only=True, trust_remote_code=True)
     processor.tokenizer.padding_side = "right"
 
-    # Add reasoning tokens
-    special_tokens_dict = {'additional_special_tokens': ['<think>', '</think>']}
-    num_added_toks = processor.tokenizer.add_special_tokens(special_tokens_dict)
-
     print(f"Loading D2V2X Model in 4 bit...")
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -58,12 +54,16 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
     )
 
     d2v2x_model = D2V2XModel(qwen_path, mode, quantization_config=bnb_config)
-    for m in d2v2x_model.modules():
-        if hasattr(m, "config") and hasattr(m.config, "use_cache"):
-            m.config.use_cache = False
+    if hasattr(d2v2x_model.model, "config"):
+        d2v2x_model.model.config.use_cache = False
 
-    if num_added_toks > 0:
-        d2v2x_model.model.resize_token_embeddings(len(processor.tokenizer))
+    if hasattr(d2v2x_model, 'lidar_mlp'):
+        d2v2x_model.lidar_mlp.to(torch.bfloat16)
+
+    d2v2x_model.model = prepare_model_for_kbit_training(
+        d2v2x_model.model, 
+        use_gradient_checkpointing=True
+    )
 
     # Load pretrained MLP checkpoint
     if mlp_ckpt is not None and hasattr(d2v2x_model, 'lidar_mlp'):
@@ -82,13 +82,17 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
             d2v2x_model.lidar_mlp.load_state_dict(mlp_state_dict, strict=True)
             print("Successfully loaded LiDAR MLP weights.")
 
-    if stage ==2:
+    if stage == 2:
         print("Applying LoRA Config...")
-        lora_config = LoraConfig(r=64,
-                                 lora_alpha=128,
-                                 target_modules="all-linear",
-                                 modules_to_save=["embed_tokens", "lm_head"]
-                                )
+        lora_config = LoraConfig(
+            r=32,
+            lora_alpha=64,
+            target_modules=[
+                "q_proj", "k_proj", "v_proj", "o_proj", 
+                "gate_proj", "up_proj", "down_proj", 
+                "embed_tokens", "lm_head"
+            ]
+        )
         d2v2x_model.model = get_peft_model(d2v2x_model.model, lora_config)
 
     # Freeze params
@@ -100,16 +104,8 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
                 param.requires_grad = False
     else:
         for name, param in d2v2x_model.named_parameters():
-            if "lora" in name.lower() or \
-                ("lidar_mlp" in name.lower() and hasattr(d2v2x_model, 'lidar_mlp')) or \
-                "embed_tokens" in name.lower() or \
-                "lm_head" in name.lower():
+            if "lidar_mlp" in name.lower() and hasattr(d2v2x_model, 'lidar_mlp'):
                 param.requires_grad = True
-            else:
-                param.requires_grad = False
-
-    if hasattr(d2v2x_model.model, "config"):
-        d2v2x_model.model.config.use_cache = False
 
     trainable_count = sum(p.numel() for p in d2v2x_model.parameters() if p.requires_grad)
     total_count = sum(p.numel() for p in d2v2x_model.parameters())

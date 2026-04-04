@@ -6,7 +6,7 @@ save_path = "./qwen_with_lidar"
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 model = Qwen3VLForConditionalGeneration.from_pretrained(model_path, trust_remote_code=True)
 
-new_tokens = {"additional_special_tokens": ["<lidar>"]}
+new_tokens = {"additional_special_tokens": ["<lidar>", "<think>", "</think>"]}
 num_added_toks = tokenizer.add_special_tokens(new_tokens)
 
 print(f"Added {num_added_toks} tokens.")
