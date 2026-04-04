@@ -75,6 +75,8 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
             if k.startswith("lidar_mlp."):
                 new_key = k.replace("lidar_mlp.", "", 1)
                 mlp_state_dict[new_key] = v
+            else:
+                mlp_state_dict[k] = v
 
         if len(mlp_state_dict) == 0:
             print("WARNING: No LiDAR MLP weights found in checkpoint")
