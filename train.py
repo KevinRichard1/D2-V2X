@@ -87,8 +87,8 @@ def setup_model_and_processor(qwen_path: str, mode: str, stage: int, mlp_ckpt: s
     if stage == 2:
         print("Applying LoRA Config...")
         lora_config = LoraConfig(
-            r=32,
-            lora_alpha=64,
+            r=64,
+            lora_alpha=128,
             target_modules=[
                 "q_proj", "k_proj", "v_proj", "o_proj", 
                 "gate_proj", "up_proj", "down_proj", 
