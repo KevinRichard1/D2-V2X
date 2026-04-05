@@ -28,8 +28,11 @@ def run_inference(model, processor, dataset, output_file):
 
         text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         
-        user_content = messages[0]['content']
-        images = [item['image'] for item in user_content if item['type'] == 'image']
+        images = []
+        for message in messages:
+            content = message.get('content', '')
+            if isinstance(content, list):
+                images.extend([item['image'] for item in content if item.get('type') == 'image'])
 
         inputs = processor(
             text=[text],
