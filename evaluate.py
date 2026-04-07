@@ -113,13 +113,7 @@ def run_evaluation(prediction_file, tokenizer, gt_file_path=None):
         raw_preds = [item['prediction'] for item in data]
         raw_gts = [item['ground_truth'] for item in data]
 
-    # Convert to token IDs
-    encoded_preds = tokenizer(raw_preds, padding=True, return_tensors="np").input_ids
-    encoded_gts = tokenizer(raw_gts, padding=True, return_tensors="np").input_ids
-
-    eval_pred = (encoded_preds, encoded_gts)
-
-    results = compute_metrics(eval_pred, tokenizer)
+    results = compute_metrics(raw_preds, raw_gts)
     
     print("--- Evaluation Results ---")
     for key, value in sorted(results.items()):
