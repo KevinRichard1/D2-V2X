@@ -179,13 +179,13 @@ def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0, dist_thres
                     cost_matrix[i, j] = 100.0
                 else:
                     cost_matrix[i, j] = (1.0 - iou_matrix[i, j]) + type_penalty
-            elif not gt_is_visible and not pred_is_visible: # FIX: Both must be occluded
+            elif not gt_is_visible and not pred_is_visible:
                 gt_dist = gt_objects[i].get("distance_m", gt_objects[i].get("distance", 0.0))
                 pred_dist = pred_objects[j].get("distance_m", pred_objects[j].get("distance", 0.0))
                 dist_cost = min(abs(gt_dist - pred_dist), 20.0)
                 cost_matrix[i, j] = dist_cost + type_penalty
             else:
-                cost_matrix[i, j] = 100.0 # FIX: Visible cannot match Occluded
+                cost_matrix[i, j] = 100.0
 
     # Matching
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
@@ -204,7 +204,6 @@ def get_optimal_matches(gt_objects, pred_objects, penalty_dist=100.0, dist_thres
         pred_dist = pred_objects[pred_idx].get("distance_m", pred_objects[pred_idx].get("distance", 0.0))
         
         if cost_matrix[gt_idx, pred_idx] >= 100.0:
-            # FIX: Removed the double-counting of occ_fn and occ_fp here.
             continue
 
         matched_gt.add(gt_idx)
