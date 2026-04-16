@@ -147,12 +147,15 @@ if __name__ == "__main__":
         from data_pipeline.dataset import D2V2XDataset
 
         print(f"Loading Dataset in {args.mode} mode...")
+        dataset_modes = [args.mode]
+        if args.mode == "bev":
+            dataset_modes.append("image_only")
 
         dataset = D2V2XDataset(
             json_path=args.json_path,
             data_root=args.img_path,
             feature_dir=args.test_feature_path,
-            mode=args.mode,
+            mode=dataset_modes,
             is_training=False
         )
 

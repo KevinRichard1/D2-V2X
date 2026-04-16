@@ -61,7 +61,7 @@ def generate_paper_visuals(pcd_path, output_dir="../data/diagram_assets"):
     capture_high_res_image(voxel_grid, voxel_output_path)
 
 if __name__ == "__main__":
-    SAMPLE_PCD_PATH = "../data/test/point_clouds/s110_lidar_ouster_south_and_vehicle_lidar_robosense_registered/1688625742_146513298_s110_lidar_ouster_south_and_vehicle_lidar_robosense_registered.pcd" 
+    SAMPLE_PCD_PATH = "../data/val/point_clouds/s110_lidar_ouster_south_and_vehicle_lidar_robosense_registered/T.pcd" 
     
     if os.path.exists(SAMPLE_PCD_PATH):
         generate_paper_visuals(SAMPLE_PCD_PATH)
