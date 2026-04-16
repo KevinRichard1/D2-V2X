@@ -1,23 +1,3 @@
-"""Paper figure: BEV as hero, cameras on top, model comparison at bottom.
-
-Layout
-------
-  [  Q U E S T I O N  (top) ]
-  [ cam1 | cam2 | cam3 | cam4 | cam5 ]   ← small thumbnails
-  [                                   ]
-  [           BEV  (hero)             ]   ← large, annotated
-  [                                   ]
-  [ Zero-Shot answer  | D2-V2X answer ]   ← side-by-side text boxes
-
-Usage (run from project root):
-    python utils/visualize_paper_figure.py \\
-        --output Results/figures/paper_figure.png
-
-The sample is hardcoded to the best test-split entry that has:
-  - matching val BEV image
-  - D2-V2X correct, zero-shot wrong
-"""
-
 import argparse
 import json
 import math
@@ -61,7 +41,6 @@ TYPE_DIMS = {
     "bicycle": (1.8, 0.6),
 }
 
-# ── Sample (hardcoded to best test+BEV candidate) ────────────────────────────
 SAMPLE_ID  = "16980779873717473_1"
 BEV_PATH   = "Datasets/images/val/bev/1698077987_572028302_s110_lidar_ouster_south_and_vehicle_lidar_robosense_registered_bev.png"
 TEST_JSON  = "Datasets/Main Dataset/d2_v2x_test.json"
