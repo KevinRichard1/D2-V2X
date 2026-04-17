@@ -4,3 +4,4 @@ data
 *.slurm
 __pycache__
 final_model
+utils/Results

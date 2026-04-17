@@ -41,11 +41,11 @@ TYPE_DIMS = {
     "bicycle": (1.8, 0.6),
 }
 
-SAMPLE_ID  = "16980779873717473_1"
-BEV_PATH   = "Datasets/images/val/bev/1698077987_572028302_s110_lidar_ouster_south_and_vehicle_lidar_robosense_registered_bev.png"
-TEST_JSON  = "Datasets/Main Dataset/d2_v2x_test.json"
-EGO_JSON   = "Results/Raw Results/ego_results.json"
-D2_JSON    = "Results/Raw Results/d2v2x_results.json"
+SAMPLE_ID  = "16980779873717473_6"
+BEV_PATH   = "../data/test/bev/1698077987_371747309_s110_lidar_ouster_south_and_vehicle_lidar_robosense_registered_bev.png"
+TEST_JSON  = "../data/datasets/d2_v2x_test.json"
+EGO_JSON   = "../data/results/zero_shot_results.json"
+D2_JSON    = "../data/results/d2v2x_results.json"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -81,13 +81,19 @@ def draw_distance_rings(ax, rings=(10, 20, 30, 40)):
 
 def draw_cardinal(ax):
     pad = 26
-    mid = IMG_PX / 2
+    y_bottom, y_top = ax.get_ylim()
+    x_left, x_right = ax.get_xlim()
+
+    mid_x = (x_left + x_right) / 2
+    mid_y = (y_top + y_bottom) / 2
+
     kw = dict(color="white", fontsize=8, fontweight="bold", alpha=0.45,
               path_effects=_outline(1.5), zorder=12)
-    ax.text(mid, pad,          "N", ha="center", va="top",    **kw)
-    ax.text(mid, IMG_PX - pad, "S", ha="center", va="bottom", **kw)
-    ax.text(pad, mid,          "W", ha="left",   va="center", **kw)
-    ax.text(IMG_PX - pad, mid, "E", ha="right",  va="center", **kw)
+    bottom_edge = ax.get_ylim()[0]
+    ax.text(mid_x, y_top + pad,       "N", ha="center", va="top",    **kw)
+    ax.text(mid_x, y_bottom - pad,    "S", ha="center", va="bottom", **kw)
+    ax.text(x_left + pad, mid_y,      "W", ha="left",   va="center", **kw)
+    ax.text(x_right - pad, mid_y,     "E", ha="right",  va="center", **kw)
 
 
 def draw_sensor(ax):
@@ -190,7 +196,7 @@ def annotate_bev(ax, gj, gc, question=""):
 
     draw_distance_rings(ax)
     draw_cardinal(ax)
-    draw_occlusion_shadow(ax, occ_objs)
+    # draw_occlusion_shadow(ax, occ_objs)
 
     # Visible objects — muted
     for obj in vis_objs:
@@ -225,14 +231,14 @@ def annotate_bev(ax, gj, gc, question=""):
         dest_c, dest_r, rad = ego_c - 15, 400, -0.15
         arrow_lbl, al_c, al_r = "Intended\npath", ego_c - 80, (ego_r + 400) / 2
 
-    ax.annotate("", xy=(dest_c, dest_r), xytext=(ego_c, ego_r),
-                arrowprops=dict(arrowstyle="-|>", color=COL_ARROW, lw=2.5,
-                                mutation_scale=14,
-                                connectionstyle=f"arc3,rad={rad}"),
-                zorder=14)
-    ax.text(al_c, al_r, arrow_lbl, color=COL_ARROW, fontsize=7.5,
-            ha="center", va="center", fontweight="bold",
-            path_effects=_outline(), zorder=14)
+    # ax.annotate("", xy=(dest_c, dest_r), xytext=(ego_c, ego_r),
+    #             arrowprops=dict(arrowstyle="-|>", color=COL_ARROW, lw=2.5,
+    #                             mutation_scale=14,
+    #                             connectionstyle=f"arc3,rad={rad}"),
+    #             zorder=14)
+    # ax.text(al_c, al_r, arrow_lbl, color=COL_ARROW, fontsize=7.5,
+    #         ha="center", va="center", fontweight="bold",
+    #         path_effects=_outline(), zorder=14)
 
     # Conflict label
     if occ_objs:
@@ -240,23 +246,22 @@ def annotate_bev(ax, gj, gc, question=""):
         cy_px = np.mean([world_to_px(o["x"], o["y"])[1] for o in occ_objs])
         side  = 1 if cx_px < IMG_PX * 0.65 else -1
         lx = cx_px + side * 170
-        ax.annotate("", xy=(cx_px + side * 60, cy_px), xytext=(lx, cy_px),
-                    arrowprops=dict(arrowstyle="-|>", color="#FF8888", lw=1.6,
-                                   mutation_scale=9), zorder=14)
-        ax.text(lx + side * 6, cy_px,
-                "In path\n(hidden by occluder)",
-                color="#FF8888", fontsize=7.5,
-                ha="left" if side > 0 else "right", va="center",
-                fontweight="bold", path_effects=_outline(), zorder=14)
+        # ax.annotate("", xy=(cx_px + side * 60, cy_px), xytext=(lx, cy_px),
+        #             arrowprops=dict(arrowstyle="-|>", color="#FF8888", lw=1.6,
+        #                            mutation_scale=9), zorder=14)
+        # ax.text(lx + side * 6, cy_px,
+        #         "In path\n(hidden by occluder)",
+        #         color="#FF8888", fontsize=7.5,
+        #         ha="left" if side > 0 else "right", va="center",
+        #         fontweight="bold", path_effects=_outline(), zorder=14)
 
     draw_sensor(ax)
-    draw_ego_approx(ax)
+    # draw_ego_approx(ax)
 
     # BEV legend
     handles = [
         mpatches.Patch(fc=COL_SENSOR, ec="white", lw=0.8, label="Infrastructure sensor"),
         mpatches.Patch(fc=COL_EGO,    ec="white", lw=0.8, label="Ego vehicle (approx.)"),
-        mpatches.Patch(fc=COL_ARROW,  ec="white", lw=0.8, label="Intended maneuver"),
         mpatches.Patch(fc=COL_HIDDEN, ec="white", lw=0.8,
                        label=f"Hidden  ×{len(occ_objs)}  (LiDAR only)"),
     ]
@@ -363,10 +368,24 @@ def main():
     # Load data
     with open(TEST_JSON) as f:
         test_data = json.load(f)
-    with open(EGO_JSON) as f:
-        ego_results = {str(item["id"]): item for item in json.load(f)}
-    with open(D2_JSON) as f:
-        d2_results = {str(item["id"]): item for item in json.load(f)}
+    def parse_results(filepath):
+        with open(filepath) as f:
+            data = json.load(f)
+        
+        if isinstance(data, dict):
+            parsed = {}
+            for k, v in data.items():
+                if isinstance(v, str):
+                    parsed[str(k)] = {"prediction": v}
+                else:
+                    parsed[str(k)] = v
+            return parsed
+        elif isinstance(data, list):
+            return {str(item["id"]): item for item in data if "id" in item}
+        return {}
+
+    ego_results = parse_results(EGO_JSON)
+    d2_results = parse_results(D2_JSON)
 
     test_item = next(s for s in test_data if str(s["id"]) == SAMPLE_ID)
     ego_item  = ego_results[SAMPLE_ID]
@@ -464,6 +483,25 @@ def main():
     plt.savefig(args.output, dpi=200, bbox_inches="tight", facecolor=BG)
     print(f"Saved → {args.output}")
 
+    fig_bev, ax_alone = plt.subplots(figsize=(10, 10), facecolor="white")
+    ax_alone.set_facecolor("white")
+
+    if os.path.exists(BEV_PATH):
+        ax_alone.imshow(bev_img, origin="upper", zorder=1)
+    
+    ax_alone.set_xlim(0, IMG_PX)
+    ax_alone.set_ylim(IMG_PX * 0.75, 0)
+    ax_alone.set_xticks([]); ax_alone.set_yticks([])
+
+    for sp in ax_alone.spines.values():
+        sp.set_visible(False)
+
+    if gj:
+        annotate_bev(ax_alone, gj, gc, question=question)
+
+    standalone_path = args.output.replace(".png", "_standalone_bev.png")
+    fig_bev.savefig(standalone_path, dpi=300, bbox_inches="tight", facecolor="white", transparent=True)
+    print(f"Saved standalone BEV → {standalone_path}")
 
 if __name__ == "__main__":
     main()
