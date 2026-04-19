@@ -59,7 +59,8 @@ def run_inference(model, processor, dataset, output_file):
             )
 
         # Decode output
-        new_tokens = generated_ids[0]
+        input_length = inputs["input_ids"].shape[1]
+        new_tokens = generated_ids[0][input_length:]
         pred_text = processor.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
         # Store
