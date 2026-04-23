@@ -9,7 +9,7 @@ Official implementation of "D2-V2X: Depth-Driven Cooperative V2X Reasoning for A
 ## 🚀 Overview
 D2-V2X is a spatially-aware Question-Rationale-Answer (QRA) benchmark designed to move Vision-Language Models (VLMs) beyond simple perception into cooperative, reasoned decision-making. D2-V2X provides a unified multimodal framework that leverages 3D LiDAR, cooperative V2X infrastructure, and Chain-of-Thought (CoT) reasoning to address the constraint of sensor occlusions in autonomous driving.
 
-![Teaser figure comparing the D2-V2X baseline to a Zero-Shot VLM]("./figures/Teaser_Figure.png")
+![Teaser figure comparing the D2-V2X baseline to a Zero-Shot VLM](figures/Teaser_Figure.png)
 
 Key Features:
 - **Dataset**: 8,500 multimodal QRA triplets grounded in the TUMTraf-V2X universe.
