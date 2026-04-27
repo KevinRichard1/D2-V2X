@@ -68,7 +68,7 @@ python evaluate.py \
     --inference_save_path="results.json" \
 ```
 
-✍️ Citation
+## ✍️ Citation
 If you find our work useful, please cite:
 ```
 
