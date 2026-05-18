@@ -3,8 +3,8 @@ Official implementation of "D2-V2X: Depth-Driven Cooperative V2X Reasoning for A
 
 ## Quick Links:
 - Paper: [![arXiv](https://img.shields.io/badge/arXiv--b31b1b.svg)](https://arxiv.org/abs/)
-- Dataset (🤗):  [Coming Soon]
-- Model Weights (🤗): [Coming Soon]
+- Dataset (🤗):  [D2-V2X QRA Dataset](https://huggingface.co/datasets/kr301/d2v2x-qra)
+- Model Weights (🤗): [D2-V2X Model Weights](https://huggingface.co/kr301/D2V2X-adapter)
 
 ## 🚀 Overview
 D2-V2X is a spatially-aware Question-Rationale-Answer (QRA) benchmark designed to move Vision-Language Models (VLMs) beyond simple perception into cooperative, reasoned decision-making. D2-V2X provides a unified multimodal framework that leverages 3D LiDAR, cooperative V2X infrastructure, and Chain-of-Thought (CoT) reasoning to address the constraint of sensor occlusions in autonomous driving.
