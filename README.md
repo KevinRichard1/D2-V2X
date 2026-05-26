@@ -2,7 +2,7 @@
 Official implementation of "D2-V2X: Depth-Driven Cooperative V2X Reasoning for Autonomous Driving", accepted to the CVPR 2026 DriveX Workshop
 
 ## Quick Links:
-- Paper: [![arXiv](https://img.shields.io/badge/arXiv--b31b1b.svg)](https://arxiv.org/abs/)
+- Paper: [![arXiv](https://img.shields.io/badge/arXiv-2605.24098-b31b1b.svg)](https://arxiv.org/abs/2605.24098)
 - Dataset (🤗):  [D2-V2X QRA Dataset](https://huggingface.co/datasets/kr301/d2v2x-qra)
 - Model Weights (🤗): [D2-V2X Model Weights](https://huggingface.co/kr301/d2v2x-adapter)
 
