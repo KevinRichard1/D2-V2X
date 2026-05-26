@@ -71,7 +71,15 @@ python evaluate.py \
 ## ✍️ Citation
 If you find our work useful, please cite:
 ```
-
+@misc{richard2026d2v2xdepthdrivencooperativev2x,
+      title={D2-V2X: Depth-Driven Cooperative V2X Reasoning for Autonomous Driving}, 
+      author={Kevin Richard and Alphin Varghese and Colin Pham and David Oh and Srijan Das},
+      year={2026},
+      eprint={2605.24098},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2605.24098}, 
+}
 ```
 
 ## Acknowledgements
